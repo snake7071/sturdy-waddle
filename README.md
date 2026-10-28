@@ -1,4 +1,4 @@
-# 🌟 [Project Name] - Open-Source AI Desktop Companion
+## sturdy-waddle
 
 *[🇷🇺 Описание на русском языке находится ниже](#русская-версия)*
 
