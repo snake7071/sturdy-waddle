@@ -1,0 +1,10 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Capability for mascot and dashboard windows",
+  "windows": ["mascot", "dashboard", "main", "*"],
+  "permissions": [
+    "core:default",
+    "opener:default"
+  ]
+}

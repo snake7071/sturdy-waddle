@@ -1,0 +1,667 @@
+/**
+ * GNU General Public License v3.0
+ * Direct Client-to-API Gemini Integration via official @google/genai SDK
+ * Real-time streaming with Thinking Mode (Chain-of-Thought reasoning) and strict 3-step Tool Calling.
+ */
+
+import { GoogleGenAI } from "@google/genai";
+import { sanitizeForLLM } from "./sanitizer";
+import { CompanionCommand } from "../types/commands";
+import { GEMINI_TOOLS } from "./tools";
+
+export interface SystemProfile {
+  os_name: string;
+  os_version: string;
+  desktop_env: string;
+  session_type: string;
+  user_name: string;
+  default_shell: string;
+}
+
+export interface BrainPart {
+  text?: string;
+  inlineData?: {
+    mimeType: string;
+    data: string;
+  };
+  functionCall?: {
+    id?: string;
+    name: string;
+    args: Record<string, any>;
+  };
+  functionResponse?: {
+    id?: string;
+    name: string;
+    response: Record<string, any>;
+  };
+}
+
+export interface BrainTurn {
+  role: "user" | "model";
+  parts: BrainPart[];
+}
+
+export interface BrainConfig {
+  modelName?: string;
+  userName?: string;
+  systemProfile?: SystemProfile;
+  thinkingBudget?: number;
+  maxShortTermHistoryTurns?: number;
+  compactionThresholdTokens?: number;
+}
+
+export type CommandExecutor = (
+  command: CompanionCommand
+) => Promise<{ success: boolean; output: string }>;
+
+/**
+ * Extracts a human-friendly message from Gemini API errors, preventing raw JSON dumps.
+ */
+function formatGeminiError(err: any): string {
+  if (!err) return "Google AI servers are overloaded. Please try again in a few seconds.";
+
+  const rawMessage = typeof err === "string" ? err : err.message || String(err);
+  let errorCode: number | undefined = err.status || err.code;
+  let statusText: string | undefined = err.statusText;
+  let parsedMsg = rawMessage;
+
+  // Attempt to parse embedded JSON payload
+  const jsonMatch = rawMessage.match(/\{[\s\S]*\}/);
+  if (jsonMatch) {
+    try {
+      const parsed = JSON.parse(jsonMatch[0]);
+      if (parsed.error) {
+        errorCode = parsed.error.code || errorCode;
+        statusText = parsed.error.status || statusText;
+        parsedMsg = parsed.error.message || parsedMsg;
+      }
+    } catch {
+      // ignore JSON parse failure
+    }
+  }
+
+  const combined = `${errorCode ?? ""} ${statusText ?? ""} ${parsedMsg} ${rawMessage}`.toLowerCase();
+
+  if (
+    combined.includes("503") ||
+    combined.includes("overloaded") ||
+    combined.includes("high demand") ||
+    combined.includes("unavailable")
+  ) {
+    return "Google AI servers are overloaded. Please try again in a few seconds.";
+  }
+
+  if (
+    combined.includes("429") ||
+    combined.includes("resource_exhausted") ||
+    combined.includes("quota")
+  ) {
+    return "Достигнут суточный лимит запросов Gemini API. Попробуйте модель gemini-3.5-flash или gemini-3.1-flash-lite.";
+  }
+
+  if (
+    combined.includes("401") ||
+    combined.includes("403") ||
+    combined.includes("unauthenticated") ||
+    combined.includes("permission_denied") ||
+    combined.includes("api key not valid")
+  ) {
+    return "Invalid or unauthorized API key.";
+  }
+
+  if (combined.includes("abort") || combined.includes("cancelled")) {
+    return "Request was cancelled.";
+  }
+
+  // Strip JSON brackets and trim
+  const clean = parsedMsg.replace(/\{.*?\}|\[.*?\]/g, "").replace(/\s+/g, " ").trim();
+  return clean || "Google AI servers are overloaded. Please try again in a few seconds.";
+}
+
+export class GeminiBrain {
+  private shortTermHistory: BrainTurn[] = [];
+  private config: BrainConfig;
+  private onMemoryCompactionGlitch?: (summary: string) => void;
+
+  constructor(
+    config: BrainConfig = {},
+    onMemoryCompactionGlitch?: (summary: string) => void
+  ) {
+    this.config = {
+      modelName: "gemini-3.5-flash",
+      thinkingBudget: 1024,
+      maxShortTermHistoryTurns: 25,
+      compactionThresholdTokens: 4000,
+      ...config,
+    };
+    this.onMemoryCompactionGlitch = onMemoryCompactionGlitch;
+  }
+
+  public setSystemProfile(profile: SystemProfile): void {
+    this.config.systemProfile = profile;
+    if (profile.user_name && !this.config.userName) {
+      this.config.userName = profile.user_name;
+    }
+  }
+
+  /**
+   * Tests connection to Gemini API with a lightweight ping
+   */
+  public static async testConnection(
+    apiKey: string,
+    modelName?: string
+  ): Promise<{ success: boolean; message: string; latencyMs?: number }> {
+    const trimmed = (apiKey || "").trim();
+    if (!trimmed) {
+      return { success: false, message: "API ключ Google Gemini не указан." };
+    }
+    const model = (modelName || "gemini-3.5-flash").trim();
+    const startTime = Date.now();
+    try {
+      const client = new GoogleGenAI({ apiKey: trimmed });
+      await client.models.generateContent({
+        model,
+        contents: "ping",
+        config: { maxOutputTokens: 2 },
+      });
+      const latencyMs = Date.now() - startTime;
+      return {
+        success: true,
+        message: `Подключение к Gemini успешно! Задержка: ${latencyMs}ms (${model})`,
+        latencyMs,
+      };
+    } catch (err: any) {
+      const formatted = formatGeminiError(err);
+      return { success: false, message: formatted };
+    }
+  }
+
+  /**
+   * Dynamic getter that resolves the Gemini client on demand.
+   * Priority: localStorage.getItem("gemini_api_key") -> import.meta.env.VITE_GEMINI_API_KEY
+   */
+  public getGeminiClient(): GoogleGenAI {
+    const localKey = typeof window !== "undefined" ? localStorage.getItem("gemini_api_key") : null;
+    const envKey = (import.meta as any).env?.VITE_GEMINI_API_KEY;
+    const apiKey = (localKey && localKey.trim()) || (envKey && envKey.trim()) || "";
+
+    if (!apiKey) {
+      throw new Error("Gemini API key is missing. Click the settings gear to add it.");
+    }
+
+    return new GoogleGenAI({ apiKey });
+  }
+
+  /**
+   * System Prompt enforcing strictly 1-2 sentence brevity for compact desktop UX and TTS,
+   * with lightweight system fingerprint meta header.
+   */
+  private getSystemPrompt(): string {
+    const user = this.config.userName || this.config.systemProfile?.user_name || "friend";
+    const profile = this.config.systemProfile;
+
+    const envHeader = profile
+      ? `System Environment:
+- OS: ${profile.os_name} ${profile.os_version} (${profile.session_type}, ${profile.desktop_env})
+- Shell: ${profile.default_shell}
+- User: ${user}
+`
+      : "";
+
+    return `${envHeader}You are a cute anime companion mascot living on ${user}'s desktop.
+BREVITY CONSTRAINT (STRICT): You must ALWAYS respond in 1 to 2 concise sentences maximum.
+Respond in the language the user speaks (e.g. Russian if user speaks Russian).
+Never write long paragraphs or markdown bullet lists in standard chat.
+Your responses are displayed in a compact floating speech bubble and read aloud by TTS.
+Be playful, warm, cute, observant, intelligent, and helpful.
+
+ACTIONS & TOOLS (ROLE AS SEMANTIC BRAIN):
+You control the user's desktop computer via tools.
+1. SLANG, ABBREVIATIONS & SYNONYM NORMALIZATION:
+   As the intelligent semantic brain, understand all colloquialisms, slang, abbreviations, and informal names in any language (e.g. Russian: "телега", "тг" -> "Telegram"; "хром", "браузер", "интернет" -> "browser"; "терминал", "консоль", "командная строка" -> "terminal"; "код", "вскод" -> "code"; "стим" -> "steam"; "дискорд" -> "discord").
+   ALWAYS normalize user requests into canonical entity names when invoking launch_app:
+   - appName: "Telegram" (for Telegram / телега / тг)
+   - appName: "browser" (for default browser / хром / браузер)
+   - appName: "terminal" (for console / terminal / консоль)
+   - Or standard application names: "code", "discord", "steam", "spotify", etc.
+2. TERMINAL COMMANDS & DIAGNOSTICS:
+   When the user asks to execute a command, scan, or script in the terminal/console (e.g. "выполни nmap скан машины", "запусти ping", "проверь сеть", "запусти команду в терминале"):
+   Call launch_app with appName: "terminal" and the command in args: ["<command>"].
+   The OS controller automatically launches the system's default terminal ($TERMINAL, Windows Terminal, Terminal.app) and keeps the interactive console open after execution so the user can inspect output and run further commands.
+3. OPENING LINKS & SITES:
+   When the user asks to open any website, video, music, or link (e.g. "открой ютуб", "open youtube", "найди в гугле"), call open_url with the full URL (e.g. 'https://www.youtube.com', 'https://github.com', 'https://google.com').
+4. Call tools whenever relevant. After receiving the tool execution result, give a cute, cheerful 1-sentence confirmation.`;
+  }
+
+  /**
+   * Sends user prompt with real-time streaming, Thinking Mode (Chain-of-Thought),
+   * post-stream tool execution, and official Gemini functionResponse completion.
+   */
+  public async sendPrompt(
+    rawPrompt: string,
+    imageAttachmentBase64?: string,
+    onChunk?: (accumulatedText: string) => void,
+    commandExecutor?: CommandExecutor,
+    onThinking?: (thoughtText: string) => void
+  ): Promise<{ responseText: string; toolCalls: CompanionCommand[] }> {
+    // 1. Resolve client dynamically on-demand
+    const ai = this.getGeminiClient();
+
+    // 2. Pre-flight Privacy Redaction Filter
+    const sanitizedPrompt = sanitizeForLLM(rawPrompt);
+
+    // 3. Sliding window check & Compaction Trigger
+    if (this.shortTermHistory.length >= (this.config.maxShortTermHistoryTurns || 25)) {
+      await this.compactMemory();
+    }
+
+    // 4. Build current turn
+    const currentParts: BrainPart[] = [{ text: sanitizedPrompt }];
+    if (imageAttachmentBase64) {
+      const mimeType = imageAttachmentBase64.startsWith("data:image/png")
+        ? "image/png"
+        : "image/jpeg";
+      const base64Data = imageAttachmentBase64.replace(/^data:image\/\w+;base64,/, "");
+      currentParts.push({
+        inlineData: {
+          mimeType,
+          data: base64Data,
+        },
+      });
+    }
+
+    const userTurn: BrainTurn = {
+      role: "user",
+      parts: currentParts,
+    };
+
+    const contents: any[] = [...this.shortTermHistory, userTurn];
+    const systemInstruction = this.getSystemPrompt();
+
+    // Auto-migrate any deprecated model names (gemini-2.0 or 2.5) to active gemini-3.5-flash
+    let storedModel = typeof window !== "undefined" ? localStorage.getItem("gemini_model_name") : null;
+    if (storedModel && (storedModel.includes("2.0") || storedModel.includes("2.5"))) {
+      storedModel = "gemini-3.5-flash";
+      try {
+        localStorage.setItem("gemini_model_name", "gemini-3.5-flash");
+      } catch {}
+    }
+
+    let storedBudget = typeof window !== "undefined" ? localStorage.getItem("gemini_thinking_budget") : null;
+
+    const primaryModel = (storedModel && storedModel.trim()) || this.config.modelName || "gemini-3.5-flash";
+    const fallbackModel = "gemini-3.1-flash-lite";
+
+    const thinkingBudget = storedBudget !== null ? parseInt(storedBudget, 10) : (this.config.thinkingBudget ?? 1024);
+
+    const buildStreamConfig = (model: string) => {
+      const isLite = model.includes("flash-lite");
+      const cfg: any = {
+        systemInstruction,
+        temperature: 0.7,
+        maxOutputTokens: 2048,
+        tools: [{ functionDeclarations: GEMINI_TOOLS as any }],
+      };
+
+      if (thinkingBudget > 0 && !isLite) {
+        cfg.thinkingConfig = {
+          thinkingBudget,
+          includeThoughts: true,
+        };
+      }
+      return cfg;
+    };
+
+    const fetchStreamWithFallback = async (requestContents: any[]) => {
+      const fetchFromModel = async (model: string) => {
+        return await ai.models.generateContentStream({
+          model,
+          contents: requestContents,
+          config: buildStreamConfig(model),
+        });
+      };
+
+      try {
+        const timeoutPromise = new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error("Primary model connection timeout")), 6000)
+        );
+        return await Promise.race([fetchFromModel(primaryModel), timeoutPromise]);
+      } catch (err: any) {
+        console.warn(`[GeminiBrain] Primary model (${primaryModel}) error:`, err?.message, `Falling back to ${fallbackModel}`);
+        return await fetchFromModel(fallbackModel);
+      }
+    };
+
+    // Step 1: Initial stream response (accumulate text and function calls, NO mid-stream execution)
+    let accumulatedText = "";
+    const rawFunctionCalls: Array<{ id?: string; name: string; args: Record<string, any> }> = [];
+    const seenCallKeys = new Set<string>();
+
+    let responseStream: any = null;
+    try {
+      responseStream = await fetchStreamWithFallback(contents);
+    } catch (err: any) {
+      console.error("[GeminiBrain] Failed to start stream:", err);
+      throw new Error(formatGeminiError(err));
+    }
+
+    try {
+      for await (const chunk of responseStream) {
+        let chunkText = "";
+
+        if (chunk.candidates && chunk.candidates[0]?.content?.parts) {
+          for (const part of chunk.candidates[0].content.parts) {
+            if (part.thought) {
+              if (onThinking && part.text) {
+                onThinking(part.text);
+              }
+            } else if (part.text) {
+              chunkText += part.text;
+            }
+          }
+        } else if (chunk.text) {
+          chunkText = chunk.text;
+        }
+
+        if (chunkText) {
+          accumulatedText += chunkText;
+          if (onChunk) {
+            onChunk(accumulatedText);
+          }
+        }
+
+        // Buffer function calls strictly without executing during stream chunks
+        const functionCalls = chunk.functionCalls;
+        if (functionCalls && Array.isArray(functionCalls)) {
+          for (const fc of functionCalls) {
+            if (fc.name) {
+              const callKey = `${fc.id || ""}:${fc.name}:${JSON.stringify(fc.args || {})}`;
+              if (!seenCallKeys.has(callKey)) {
+                seenCallKeys.add(callKey);
+                rawFunctionCalls.push({
+                  id: fc.id,
+                  name: fc.name,
+                  args: fc.args || {},
+                });
+              }
+            }
+          }
+        }
+      }
+    } catch (streamErr: any) {
+      console.error("[GeminiBrain] Streaming error mid-stream:", streamErr);
+      if (!accumulatedText && rawFunctionCalls.length === 0) {
+        throw new Error(formatGeminiError(streamErr));
+      }
+    }
+
+    // Step 2: Handle completion or Tool Calling State Machine
+    if (rawFunctionCalls.length === 0) {
+      // Pure conversational turn (no function calls)
+      const finalText = accumulatedText.trim();
+      const modelTurn: BrainTurn = {
+        role: "model",
+        parts: [{ text: finalText }],
+      };
+      this.shortTermHistory.push(userTurn);
+      this.shortTermHistory.push(modelTurn);
+      return { responseText: finalText, toolCalls: [] };
+    }
+
+    // Map raw function calls to structured CompanionCommands
+    const commands: CompanionCommand[] = [];
+    for (const fc of rawFunctionCalls) {
+      const cmd = this.mapFunctionCallToCommand(fc.name, fc.args);
+      if (cmd) {
+        commands.push(cmd);
+      }
+    }
+
+    // If no command executor provided, return the commands directly
+    if (!commandExecutor) {
+      const modelTurn: BrainTurn = {
+        role: "model",
+        parts: [
+          ...(accumulatedText ? [{ text: accumulatedText }] : []),
+          ...rawFunctionCalls.map((fc) => ({
+            functionCall: { id: fc.id, name: fc.name, args: fc.args },
+          })),
+        ],
+      };
+      this.shortTermHistory.push(userTurn);
+      this.shortTermHistory.push(modelTurn);
+      return { responseText: accumulatedText.trim(), toolCalls: commands };
+    }
+
+    // Step 3: Execute tools post-stream and build formal functionResponses
+    const toolResponses: BrainPart[] = [];
+    for (let i = 0; i < commands.length; i++) {
+      const cmd = commands[i];
+      const fc = rawFunctionCalls[i];
+      try {
+        const execResult = await commandExecutor(cmd);
+        toolResponses.push({
+          functionResponse: {
+            id: fc.id,
+            name: fc.name,
+            response: {
+              output: execResult.output,
+              success: execResult.success,
+            },
+          },
+        });
+      } catch (err: any) {
+        toolResponses.push({
+          functionResponse: {
+            id: fc.id,
+            name: fc.name,
+            response: {
+              error: err?.message || String(err),
+              success: false,
+            },
+          },
+        });
+      }
+    }
+
+    // Step 4: Construct standard 3-step state machine turns:
+    // Turn A (Model): contains the functionCall(s) and plain text (without raw thought tokens)
+    const modelCallTurn: BrainTurn = {
+      role: "model",
+      parts: [
+        ...(accumulatedText ? [{ text: accumulatedText }] : []),
+        ...rawFunctionCalls.map((fc) => ({
+          functionCall: { id: fc.id, name: fc.name, args: fc.args },
+        })),
+      ],
+    };
+
+    // Turn B (User/Tool): contains the corresponding functionResponse(s)
+    const toolResponseTurn: BrainTurn = {
+      role: "user",
+      parts: toolResponses,
+    };
+
+    // Step 5: Follow-up call to Gemini with the function results so the model
+    // can conclude naturally and speak the result in the bubble
+    const followUpContents = [...contents, modelCallTurn, toolResponseTurn];
+    let finalModelResponse = "";
+
+    try {
+      const followUpStream = await fetchStreamWithFallback(followUpContents);
+      for await (const chunk of followUpStream) {
+        let chunkText = "";
+
+        if (chunk.candidates && chunk.candidates[0]?.content?.parts) {
+          for (const part of chunk.candidates[0].content.parts) {
+            if (part.thought) {
+              if (onThinking && part.text) {
+                onThinking(part.text);
+              }
+            } else if (part.text) {
+              chunkText += part.text;
+            }
+          }
+        } else if (chunk.text) {
+          chunkText = chunk.text;
+        }
+
+        if (chunkText) {
+          finalModelResponse += chunkText;
+          if (onChunk) {
+            onChunk(finalModelResponse);
+          }
+        }
+      }
+    } catch (followUpErr) {
+      console.warn("[GeminiBrain] Follow-up completion error:", followUpErr);
+    }
+
+    const cleanedFinalResponse =
+      finalModelResponse.trim() ||
+      accumulatedText.trim() ||
+      (commands.some((c) => c.type === "open_url")
+        ? "Открыла ссылку! ✨"
+        : "Готово! 🚀");
+
+    const finalModelTurn: BrainTurn = {
+      role: "model",
+      parts: [{ text: cleanedFinalResponse }],
+    };
+
+    // Save complete, well-formed conversation transaction into history
+    this.shortTermHistory.push(userTurn);
+    this.shortTermHistory.push(modelCallTurn);
+    this.shortTermHistory.push(toolResponseTurn);
+    this.shortTermHistory.push(finalModelTurn);
+
+    return { responseText: cleanedFinalResponse, toolCalls: commands };
+  }
+
+  /**
+   * Compaction with Glitch Reaction:
+   * Safely trims sliding window while preserving valid turn alternation.
+   */
+  private async compactMemory(): Promise<void> {
+    if (this.shortTermHistory.length === 0) return;
+
+    try {
+      if (this.onMemoryCompactionGlitch) {
+        this.onMemoryCompactionGlitch("Compacting context...");
+      }
+
+      // Keep last 6 turns
+      this.shortTermHistory = this.shortTermHistory.slice(-6);
+
+      // Ensure the history begins with a clean user turn
+      while (
+        this.shortTermHistory.length > 0 &&
+        (this.shortTermHistory[0].role !== "user" ||
+          this.shortTermHistory[0].parts.some((p) => p.functionResponse !== undefined))
+      ) {
+        this.shortTermHistory.shift();
+      }
+
+      console.info(`[GeminiBrain] Context pruned. Active turns: ${this.shortTermHistory.length}`);
+    } catch (e) {
+      console.warn("[GeminiBrain] Compaction error:", e);
+    }
+  }
+
+  private mapFunctionCallToCommand(name: string, args: any): CompanionCommand | null {
+    const id = `cmd-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+    const timestamp = Date.now();
+    const safeArgs = args || {};
+
+    switch (name) {
+      case "open_url":
+        return {
+          id,
+          timestamp,
+          type: "open_url",
+          securityLevel: "safe",
+          payload: { url: safeArgs.url || "" },
+        };
+      case "launch_app":
+      case "launch_application": {
+        const appName =
+          safeArgs.appName ||
+          safeArgs.app_name ||
+          safeArgs.name ||
+          safeArgs.application ||
+          safeArgs.app ||
+          safeArgs.program ||
+          safeArgs.target ||
+          safeArgs.cmd ||
+          safeArgs.binary ||
+          "";
+        return {
+          id,
+          timestamp,
+          type: "launch_app",
+          securityLevel: "safe",
+          payload: {
+            appName,
+            args: Array.isArray(safeArgs.args) ? safeArgs.args : [],
+          },
+        };
+      }
+      case "execute_shell":
+        return {
+          id,
+          timestamp,
+          type: "execute_shell",
+          securityLevel: "destructive",
+          payload: {
+            command: safeArgs.command || "",
+            cwd: safeArgs.cwd,
+            explanation: safeArgs.explanation || "",
+          },
+        };
+      case "file_operation":
+        return {
+          id,
+          timestamp,
+          type: "file_operation",
+          securityLevel:
+            safeArgs.action === "delete" || safeArgs.action === "write"
+              ? "destructive"
+              : "safe",
+          payload: {
+            action: safeArgs.action || "read",
+            path: safeArgs.path || "",
+            content: safeArgs.content,
+          },
+        };
+      case "window_perch":
+        return {
+          id,
+          timestamp,
+          type: "window_perch",
+          securityLevel: "safe",
+          payload: { target: safeArgs.target || "active" },
+        };
+      case "capture_screen":
+        return {
+          id,
+          timestamp,
+          type: "capture_screen",
+          securityLevel: "safe",
+          payload: { reason: safeArgs.reason || "explicit_user_request" },
+        };
+      case "set_timer":
+        return {
+          id,
+          timestamp,
+          type: "set_timer",
+          securityLevel: "safe",
+          payload: {
+            durationSeconds: safeArgs.durationSeconds || 60,
+            label: safeArgs.label || "Timer",
+          },
+        };
+      default:
+        return null;
+    }
+  }
+}
