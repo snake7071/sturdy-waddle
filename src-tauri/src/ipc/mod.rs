@@ -5,6 +5,7 @@ use crate::brain::{MemoryItem, MemoryStore};
 use crate::hands::indexer::AppIndexer;
 use crate::hands::system_info::{get_system_profile, SystemProfile};
 use crate::hands::{ExecutionResult, OsController, WindowGeometry};
+#[allow(unused_imports)]
 use base64::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;

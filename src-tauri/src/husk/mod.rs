@@ -2,6 +2,7 @@
 // Production-Ready Husk Mode Local IPC Server
 
 use serde::{Deserialize, Serialize};
+#[cfg(unix)]
 use std::path::Path;
 use tauri::{AppHandle, Emitter};
 

@@ -87,10 +87,12 @@ pub fn create_os_controller(memory_store: Arc<MemoryStore>) -> Arc<dyn OsControl
 // Linux Implementation (XDG Standards, $TERMINAL / Wayland / X11)
 // ============================================================================
 
+#[cfg(any(target_os = "linux", not(any(target_os = "windows", target_os = "macos"))))]
 pub struct LinuxOsController {
     memory_store: Arc<MemoryStore>,
 }
 
+#[cfg(any(target_os = "linux", not(any(target_os = "windows", target_os = "macos"))))]
 impl LinuxOsController {
     /// Discovers the system's default terminal emulator using standard specifications:
     /// 1. $TERMINAL environment variable (POSIX/Freedesktop standard)
@@ -180,6 +182,7 @@ impl LinuxOsController {
     }
 }
 
+#[cfg(any(target_os = "linux", not(any(target_os = "windows", target_os = "macos"))))]
 #[async_trait]
 impl OsController for LinuxOsController {
     async fn get_active_window(&self) -> Result<WindowGeometry, String> {
@@ -726,6 +729,7 @@ impl OsController for MacOsController {
 
 #[cfg(test)]
 mod tests {
+    #[allow(unused_imports)]
     use super::*;
 
     #[test]

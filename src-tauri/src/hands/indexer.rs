@@ -93,7 +93,6 @@ impl AppIndexer {
         apps
     }
 
-    #[cfg(target_os = "linux")]
     pub fn parse_desktop_file(path: &Path, id: &str) -> Option<InstalledApp> {
         let content = std::fs::read_to_string(path).ok()?;
         let mut is_desktop_entry = false;
