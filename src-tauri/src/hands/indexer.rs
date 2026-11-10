@@ -27,7 +27,11 @@ impl AppIndexer {
         {
             Self::scan_windows()
         }
-        #[cfg(not(any(target_os = "linux", target_os = "windows")))]
+        #[cfg(target_os = "macos")]
+        {
+            Self::scan_macos()
+        }
+        #[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "macos")))]
         {
             Vec::new()
         }
@@ -228,8 +232,160 @@ impl AppIndexer {
 
     #[cfg(target_os = "windows")]
     fn scan_windows() -> Vec<InstalledApp> {
-        // Windows Start Menu scanner placeholder
-        Vec::new()
+        let mut apps = Vec::new();
+        let mut seen_names = std::collections::HashSet::new();
+
+        let mut search_dirs = Vec::new();
+
+        // 1. All Users Start Menu Programs
+        if let Ok(prog_data) = std::env::var("ProgramData") {
+            search_dirs.push(PathBuf::from(prog_data).join("Microsoft").join("Windows").join("Start Menu").join("Programs"));
+        } else if let Ok(all_users) = std::env::var("ALLUSERSPROFILE") {
+            search_dirs.push(PathBuf::from(all_users).join("Microsoft").join("Windows").join("Start Menu").join("Programs"));
+        }
+
+        // 2. Current User Start Menu Programs
+        if let Ok(app_data) = std::env::var("APPDATA") {
+            search_dirs.push(PathBuf::from(app_data).join("Microsoft").join("Windows").join("Start Menu").join("Programs"));
+        }
+
+        fn walk_shortcuts(dir: &Path, depth: usize, out: &mut Vec<PathBuf>) {
+            if depth > 3 {
+                return;
+            }
+            if let Ok(entries) = std::fs::read_dir(dir) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.is_dir() {
+                        walk_shortcuts(&path, depth + 1, out);
+                    } else if path.extension().and_then(|s| s.to_str()).map(|e| e.eq_ignore_ascii_case("lnk")).unwrap_or(false) {
+                        out.push(path);
+                    }
+                }
+            }
+        }
+
+        let mut shortcuts = Vec::new();
+        for dir in search_dirs {
+            if dir.is_dir() {
+                walk_shortcuts(&dir, 0, &mut shortcuts);
+            }
+        }
+
+        for lnk in shortcuts {
+            let stem = match lnk.file_stem().and_then(|s| s.to_str()) {
+                Some(s) => s.trim().to_string(),
+                None => continue,
+            };
+
+            let stem_lower = stem.to_lowercase();
+            if stem_lower.contains("uninstall") || stem_lower.contains("help") || stem_lower.contains("read me") || stem_lower.contains("documentation") {
+                continue;
+            }
+
+            if seen_names.contains(&stem_lower) {
+                continue;
+            }
+
+            seen_names.insert(stem_lower.clone());
+            let path_str = lnk.to_string_lossy().to_string();
+
+            apps.push(InstalledApp {
+                id: stem_lower,
+                display_name: stem.clone(),
+                exec_cmd: path_str.clone(),
+                keywords: Some(format!("windows app shortcut {}", stem)),
+                icon: None,
+                desktop_file_path: Some(path_str),
+            });
+        }
+
+        apps
+    }
+
+    #[cfg(target_os = "macos")]
+    fn scan_macos() -> Vec<InstalledApp> {
+        let mut apps = Vec::new();
+        let mut seen_ids = std::collections::HashSet::new();
+
+        let mut search_dirs = vec![
+            PathBuf::from("/Applications"),
+            PathBuf::from("/System/Applications"),
+            PathBuf::from("/System/Applications/Utilities"),
+        ];
+
+        if let Ok(home) = std::env::var("HOME") {
+            search_dirs.push(PathBuf::from(home).join("Applications"));
+        }
+
+        for dir in search_dirs {
+            if !dir.is_dir() {
+                continue;
+            }
+
+            let entries = match std::fs::read_dir(&dir) {
+                Ok(e) => e,
+                Err(_) => continue,
+            };
+
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.extension().and_then(|s| s.to_str()) != Some("app") {
+                    continue;
+                }
+
+                let folder_stem = match path.file_stem().and_then(|s| s.to_str()) {
+                    Some(s) => s.trim().to_string(),
+                    None => continue,
+                };
+
+                let mut bundle_id: Option<String> = None;
+                let mut display_name = folder_stem.clone();
+
+                let info_plist = path.join("Contents").join("Info.plist");
+                if info_plist.is_file() {
+                    if let Ok(content) = std::fs::read_to_string(&info_plist) {
+                        if let Some(pos) = content.find("CFBundleIdentifier") {
+                            if let Some(str_start) = content[pos..].find("<string>") {
+                                if let Some(str_end) = content[pos + str_start..].find("</string>") {
+                                    let id = &content[pos + str_start + 8..pos + str_start + str_end];
+                                    bundle_id = Some(id.trim().to_string());
+                                }
+                            }
+                        }
+                        if let Some(pos) = content.find("CFBundleDisplayName") {
+                            if let Some(str_start) = content[pos..].find("<string>") {
+                                if let Some(str_end) = content[pos + str_start..].find("</string>") {
+                                    let name = &content[pos + str_start + 8..pos + str_start + str_end];
+                                    let clean_name = name.trim();
+                                    if !clean_name.is_empty() {
+                                        display_name = clean_name.to_string();
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                let id = bundle_id.unwrap_or_else(|| folder_stem.to_lowercase());
+                if seen_ids.contains(&id) {
+                    continue;
+                }
+                seen_ids.insert(id.clone());
+
+                let path_str = path.to_string_lossy().to_string();
+                apps.push(InstalledApp {
+                    id,
+                    display_name: display_name.clone(),
+                    exec_cmd: folder_stem.clone(),
+                    keywords: Some(format!("macOS bundle {}", display_name)),
+                    icon: None,
+                    desktop_file_path: Some(path_str),
+                });
+            }
+        }
+
+        apps
     }
 }
 

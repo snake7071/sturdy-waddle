@@ -71,11 +71,11 @@ pub fn create_os_controller(memory_store: Arc<MemoryStore>) -> Arc<dyn OsControl
     }
     #[cfg(target_os = "windows")]
     {
-        Arc::new(WindowsOsController)
+        Arc::new(WindowsOsController { memory_store })
     }
     #[cfg(target_os = "macos")]
     {
-        Arc::new(MacOsController)
+        Arc::new(MacOsController { memory_store })
     }
     #[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "macos")))]
     {
@@ -446,7 +446,9 @@ impl OsController for LinuxOsController {
 // ============================================================================
 
 #[allow(dead_code)]
-pub struct WindowsOsController;
+pub struct WindowsOsController {
+    pub memory_store: Arc<MemoryStore>,
+}
 
 #[async_trait]
 impl OsController for WindowsOsController {
@@ -477,14 +479,19 @@ impl OsController for WindowsOsController {
 
         match command {
             Some(cmd) if !cmd.trim().is_empty() => {
+                let trimmed = cmd.trim();
+                let wrapped = format!(
+                    "{}; Write-Host '`n=== [Command completed. Console remains open for further actions] ===' -ForegroundColor Cyan",
+                    trimmed
+                );
                 if has_wt {
                     Command::new("wt.exe")
-                        .args(["powershell.exe", "-NoExit", "-Command", cmd.trim()])
+                        .args(["powershell.exe", "-NoExit", "-Command", &wrapped])
                         .spawn()
                         .map_err(|e| format!("Failed to launch Windows Terminal: {}", e))?;
                 } else {
                     Command::new("powershell.exe")
-                        .args(["-NoExit", "-Command", cmd.trim()])
+                        .args(["-NoExit", "-Command", &wrapped])
                         .spawn()
                         .map_err(|e| format!("Failed to launch PowerShell: {}", e))?;
                 }
@@ -509,25 +516,41 @@ impl OsController for WindowsOsController {
         let clean = app_name.trim();
         let lower = clean.to_lowercase();
 
-        if lower == "terminal" || lower == "console" {
+        // 1. Abstract System Entities handled through OS defaults
+        if lower == "terminal" || lower == "console" || lower == "терминал" || lower == "консоль" {
             let cmd = if args.is_empty() { None } else { Some(args.join(" ")) };
             return self.open_terminal(cmd.as_deref()).await;
         }
 
-        if lower == "browser" {
-            return self.open_url(args.first().map(|s| s.as_str()).unwrap_or("https://duckduckgo.com")).await;
+        if lower == "browser" || lower == "браузер" {
+            let url = args.first().map(|s| s.as_str()).unwrap_or("https://duckduckgo.com");
+            return self.open_url(url).await;
         }
 
+        // 2. Query SQLite Index (Start Menu shortcuts / App Paths indexed)
+        if let Ok(matches) = self.memory_store.search_installed_apps(clean) {
+            if let Some(matched_app) = matches.first() {
+                let target = matched_app.desktop_file_path.as_deref().unwrap_or(&matched_app.exec_cmd);
+                let mut cmd = Command::new("cmd");
+                cmd.args(["/c", "start", "", target]);
+                cmd.args(args);
+                if cmd.spawn().is_ok() {
+                    return Ok(());
+                }
+            }
+        }
+
+        // 3. Fallback: direct start command with application name/executable
         let mut cmd = Command::new("cmd");
         cmd.args(["/c", "start", "", clean]);
         cmd.args(args);
-        cmd.spawn().map_err(|e| format!("Failed to start '{}': {}", clean, e))?;
+        cmd.spawn().map_err(|e| format!("Failed to start '{}' on Windows: {}", clean, e))?;
         Ok(())
     }
 
     async fn execute_shell(&self, command_str: &str, cwd: Option<&str>) -> Result<ExecutionResult, String> {
-        let mut cmd = Command::new("cmd");
-        cmd.args(["/c", command_str]);
+        let mut cmd = Command::new("powershell.exe");
+        cmd.args(["-NoProfile", "-Command", command_str]);
         if let Some(dir) = cwd {
             cmd.current_dir(dir);
         }
@@ -545,11 +568,47 @@ impl OsController for WindowsOsController {
 // ============================================================================
 
 #[allow(dead_code)]
-pub struct MacOsController;
+pub struct MacOsController {
+    pub memory_store: Arc<MemoryStore>,
+}
 
 #[async_trait]
 impl OsController for MacOsController {
     async fn get_active_window(&self) -> Result<WindowGeometry, String> {
+        let script = r#"
+            tell application "System Events"
+                set frontApp to first application process whose frontmost is true
+                set frontAppName to name of frontApp
+                tell frontApp
+                    set windowPos to position of front window
+                    set windowSize to size of front window
+                    return (item 1 of windowPos as text) & "," & (item 2 of windowPos as text) & "," & (item 1 of windowSize as text) & "," & (item 2 of windowSize as text) & "," & frontAppName
+                end tell
+            end tell
+        "#;
+        if let Ok(out) = Command::new("osascript").args(["-e", script]).output() {
+            if out.status.success() {
+                let text = String::from_utf8_lossy(&out.stdout).trim().to_string();
+                let parts: Vec<&str> = text.split(',').collect();
+                if parts.len() >= 5 {
+                    let x = parts[0].trim().parse::<i32>().unwrap_or(100);
+                    let y = parts[1].trim().parse::<i32>().unwrap_or(100);
+                    let w = parts[2].trim().parse::<u32>().unwrap_or(1200);
+                    let h = parts[3].trim().parse::<u32>().unwrap_or(800);
+                    let title = parts[4].trim().to_string();
+                    return Ok(WindowGeometry {
+                        id: "mac-front-window".into(),
+                        title,
+                        x,
+                        y,
+                        width: w,
+                        height: h,
+                        workspace: None,
+                    });
+                }
+            }
+        }
+
         Ok(WindowGeometry {
             id: "mac-focused".into(),
             title: "Active Window".into(),
@@ -573,9 +632,13 @@ impl OsController for MacOsController {
     async fn open_terminal(&self, command: Option<&str>) -> Result<(), String> {
         match command {
             Some(cmd) if !cmd.trim().is_empty() => {
-                let script = format!(
-                    "tell application \"Terminal\" to do script \"{}\"",
+                let wrapped = format!(
+                    "{}; echo ''; echo '=== [Command completed. Console remains open for further actions] ==='; exec $SHELL",
                     cmd.trim().replace('"', "\\\"")
+                );
+                let script = format!(
+                    "tell application \"Terminal\"\nactivate\ndo script \"{}\"\nend tell",
+                    wrapped
                 );
                 Command::new("osascript")
                     .args(["-e", &script])
@@ -596,15 +659,46 @@ impl OsController for MacOsController {
         let clean = app_name.trim();
         let lower = clean.to_lowercase();
 
-        if lower == "terminal" || lower == "console" {
+        if lower == "terminal" || lower == "console" || lower == "терминал" || lower == "консоль" {
             let cmd = if args.is_empty() { None } else { Some(args.join(" ")) };
             return self.open_terminal(cmd.as_deref()).await;
         }
 
-        if lower == "browser" {
-            return self.open_url(args.first().map(|s| s.as_str()).unwrap_or("https://duckduckgo.com")).await;
+        if lower == "browser" || lower == "браузер" {
+            let url = args.first().map(|s| s.as_str()).unwrap_or("https://duckduckgo.com");
+            return self.open_url(url).await;
         }
 
+        // 1. Query SQLite Index (Info.plist CFBundleIdentifier or app bundle path)
+        if let Ok(matches) = self.memory_store.search_installed_apps(clean) {
+            if let Some(matched_app) = matches.first() {
+                if matched_app.id.contains('.') {
+                    let mut cmd = Command::new("open");
+                    cmd.args(["-b", &matched_app.id]);
+                    if !args.is_empty() {
+                        cmd.arg("--args");
+                        cmd.args(args);
+                    }
+                    if cmd.spawn().is_ok() {
+                        return Ok(());
+                    }
+                }
+
+                if let Some(ref path) = matched_app.desktop_file_path {
+                    let mut cmd = Command::new("open");
+                    cmd.arg(path);
+                    if !args.is_empty() {
+                        cmd.arg("--args");
+                        cmd.args(args);
+                    }
+                    if cmd.spawn().is_ok() {
+                        return Ok(());
+                    }
+                }
+            }
+        }
+
+        // 2. Fallback: open -a <clean>
         let mut cmd = Command::new("open");
         cmd.args(["-a", clean]);
         if !args.is_empty() {
@@ -616,7 +710,7 @@ impl OsController for MacOsController {
     }
 
     async fn execute_shell(&self, command_str: &str, cwd: Option<&str>) -> Result<ExecutionResult, String> {
-        let mut cmd = Command::new("sh");
+        let mut cmd = Command::new("zsh");
         cmd.arg("-c").arg(command_str);
         if let Some(dir) = cwd {
             cmd.current_dir(dir);
