@@ -1,6 +1,6 @@
-# 🤖 Capri Desktop Companion
+# 🤖 FenBeta0
 
-> **Автономный интерактивный ИИ-маскот для рабочего стола** на базе **Tauri v2**, **React 19** и **Rust** с поддержкой мультипровайдерного ИИ (**Google Gemini** + **DeepSeek**), локальной долговременной памяти **SQLite** и нативным контроллером операционной системы.
+> **Autonomous AI Desktop Companion** built on **Tauri v2**, **React 19**, and **Rust**. Features multi-provider AI support (**Google Gemini** + **DeepSeek**), dynamic function calling, local SQLite long-term memory, and an extensible native OS controller.
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 [![Tauri v2](https://img.shields.io/badge/Tauri-v2-24C8DB.svg?logo=tauri&logoColor=white)](https://tauri.app)
@@ -11,69 +11,69 @@
 
 ---
 
-## 🌟 Ключевые возможности
+## 🌟 Key Features
 
-### 1. 🎭 Интерактивный экранный маскот
-- **Прозрачное окно-оверлей**: без рамок, поверх всех окон (`alwaysOnTop`), поддержка прозрачности и клик-сквозь (`click-through`).
-- **Физика и взаимодействие**: перемещение мышью (drag-and-drop), гравитация, падение на край экрана и приземление на активные окна (`perch`).
-- **Спрайтовый анимационный движок**:
-  - Поддержка эмоциональных состояний: `idle`, `talking`, `happy`, `thinking`, `confused`, `surprised`, `angry`, `sad`.
-  - Реалистичная анимация моргания и плавная артикуляция речи без артефактов ускорения.
-  - Речевые облака с потоковым эффектом печатающегося текста (*typewriter stream*).
-- **Кастомные аватары**: модульная загрузка аватаров через JSON-манифесты (`AvatarManager`).
+### 1. 🎭 Interactive Desktop Mascot
+- **Transparent Desktop Overlay**: Borderless, frameless, always-on-top window (`alwaysOnTop`), supporting transparency and dynamic click-through.
+- **Physics & Window Interactions**: Drag-and-drop mechanics, edge gravity, falling animations, and window perching (`perch` on top of active application windows).
+- **Sprite Animation Engine**:
+  - Full emotional state support: `idle`, `talking`, `happy`, `thinking`, `confused`, `surprised`, `angry`, and `sad`.
+  - Realistic blinking, eye tracking, and smooth mouth-flap speech articulation without jitter or animation acceleration glitches.
+  - Speech bubbles with typewriter-style streaming tokens.
+- **Modular Custom Avatars**: Extensible avatar system configured via JSON manifests (`AvatarManager`).
 
-### 2. 🧠 Мультипровайдерный ИИ (Multi-Provider AI Brain)
-- **Единый фасад (`UnifiedBrain`)**: динамическое переключение между нейросетевыми провайдерами на лету без перезапуска приложения:
-  - **Google Gemini**: поддержка `gemini-2.5-flash`, `gemini-2.5-pro`, `gemini-1.5-flash`, `gemini-1.5-pro` с настраиваемым бюджетом размышлений (*Thinking Budget*).
-  - **DeepSeek**: прямое OpenAI-совместимое подключение (`https://api.deepseek.com` с возможностью указания своего прокси/шлюза), поддержка моделей `deepseek-chat` (V3) и `deepseek-reasoner` (R1 CoT).
-- **Потоковый вывод мыслей (Reasoning Content)**: для модели `deepseek-reasoner` цепочка рассуждений в реальном времени транслируется в коллбэк мышления маскота.
-- **Двусторонний вызов инструментов (Tool / Function Calling)**:
-  - Запуск установленных приложений (`launch_app`).
-  - Открытие ссылок в системном браузере (`open_url`).
-  - Выполнение команд в терминале (`execute_shell`).
-  - Посадка на окно (`window_perch`), снимки экрана (`capture_screen`) и установка таймеров (`set_timer`).
+### 2. 🧠 Multi-Provider AI Brain
+- **Unified Brain Facade (`UnifiedBrain`)**: Seamlessly hot-swap between AI providers at runtime across all application windows via Tauri event bus:
+  - **Google Gemini**: Supports `gemini-2.5-flash`, `gemini-2.5-pro`, `gemini-1.5-flash`, and `gemini-1.5-pro`, complete with configurable reasoning thinking budgets.
+  - **DeepSeek**: Direct OpenAI-compatible SSE streaming (`https://api.deepseek.com` with customizable Base URL for reverse proxies/gateways), supporting `deepseek-chat` (V3) and `deepseek-reasoner` (R1 CoT).
+- **Reasoning Content Streaming (CoT)**: For `deepseek-reasoner`, live step-by-step thinking tokens (`reasoning_content`) stream into the mascot's thought pipeline.
+- **Bi-directional Tool / Function Calling**:
+  - Launch installed applications (`launch_app`).
+  - Open web links in the default browser (`open_url`).
+  - Execute commands in persistent terminal windows (`execute_shell`).
+  - Window perching (`window_perch`), screen snapshot capture (`capture_screen`), and countdown timers (`set_timer`).
 
-### 3. 🦾 Нативный системный контроллер (Hands & Platform Adapter)
-- **Архитектура `PlatformAdapter`**: абстрагированный слой для взаимодействия с ОС без жесткой привязки к конкретному дистрибутиву Linux.
-- **Динамический индексатор приложений (`AppIndexer`)**:
-  - Фоновое сканирование системных и пользовательских каталогов XDG (`/usr/share/applications`, `~/.local/share/applications`, Flatpak).
-  - Парсинг `.desktop`-файлов: локализованные имена (`Name[ru]`, `Name[en]`), категории, ключевые слова (`Keywords`), исполняемые команды (`Exec` с очисткой параметров `%u`, `%F`).
-  - Кэширование в базу данных SQLite для мгновенного нечёткого поиска без захардкоженных синонимов.
-  - Запуск через системный `gtk-launch` с надёжным фоллбэком на бинарники и отсоединением процесса (`process_group` / `setsid`).
-- **Умное исполнение в терминале**:
-  - Автоматическое определение установленного в системе терминала (`$TERMINAL`, `kitty`, `alacritty`, `wezterm`, `ghostty`, `gnome-terminal`, `konsole`, `xfce4-terminal`, `foot`, `xterm`).
-  - **Персистентная консоль**: консольное окно **не закрывается** после выполнения команды (флаги `--hold` либо интерактивная оболочка `$SHELL`), позволяя пользователю видеть вывод (`nmap`, `ping`, `curl`) и продолжать работу в том же окне.
-- **Безопасное открытие URL**: валидация схемы (`http://`, `https://`) и запуск через `tauri-plugin-opener` / `xdg-open`.
+### 3. 🦾 Native OS Controller (`Hands` & `PlatformAdapter`)
+- **`PlatformAdapter` Architecture**: Extensible cross-platform abstraction layer for OS automation without hardcoded distribution paths.
+- **Dynamic Application Indexer (`AppIndexer`)**:
+  - Scans system and user XDG desktop entry paths (`/usr/share/applications`, `~/.local/share/applications`, Flatpak).
+  - Parses `.desktop` files: localized names (`Name`, `Name[ru]`), categories, keywords, and executable strings (cleaning `%u`, `%F` placeholders).
+  - Stores entries in SQLite for sub-millisecond keyword and fuzzy lookup without compiled-in slang lists.
+  - Spawns apps via system `gtk-launch` with robust binary fallback and process detachment (`setsid` / `process_group`).
+- **Persistent Terminal Execution**:
+  - Auto-detects installed terminal emulators (`$TERMINAL`, `kitty`, `alacritty`, `wezterm`, `ghostty`, `gnome-terminal`, `konsole`, `xfce4-terminal`, `foot`, `xterm`).
+  - **Non-closing console**: Keeps the terminal session open after commands finish (`--hold` or interactive `$SHELL` wrapper), so scans like `nmap` or `ping` remain visible and interactive.
+- **Secure URL Dispatch**: Protocol validation (`http://`, `https://`) dispatched through `tauri-plugin-opener` / `xdg-open`.
 
-### 4. 💾 Долговременная память (Long-Term Memory)
-- Встроенная локальная база данных **SQLite** (`companion_memory.db`).
-- Сохранение фактов, пользовательских настроек, контекста диалогов и тегов.
-- Автоматическая компактификация и очистка устаревших воспоминаний.
+### 4. 💾 Long-Term Memory (LTM)
+- Local embedded **SQLite** database (`companion_memory.db`).
+- Persists user preferences, historical interactions, entity facts, and categorized tags.
+- Background memory compaction and short-term conversation sliding window.
 
-### 5. 🎛️ Панель управления (Dashboard)
+### 5. 🎛️ Companion Dashboard
 - **Settings**:
-  - Переключатель провайдеров ИИ (Gemini ⟷ DeepSeek).
-  - Маскированные поля ввода API-ключей с кнопкой показать/скрыть и ссылками на консоли получения ключей (Google AI Studio, DeepSeek Platform).
-  - Выбор модели и Base URL для DeepSeek.
-  - **Test Connection**: пинг-проверка ключа с отображением задержки отклика в миллисекундах.
-  - Мгновенное сохранение и применение настроек во всех окнах через события Tauri (`ai-settings-changed`).
-- **Avatars**: каталог аватаров, просмотр спрайтов и предпросмотр анимаций.
-- **Memory Explorer**: просмотр, поиск и редактирование записей долговременной памяти SQLite.
-- **Husk Logs**: мониторинг IPC-сокета и событий фонового демона.
+  - AI Provider toggle (Google Gemini ⟷ DeepSeek).
+  - Masked API key inputs with show/hide password toggle and direct portal links (Google AI Studio, DeepSeek Platform).
+  - Model selection dropdowns and optional DeepSeek Base URL override.
+  - **Test Connection**: Instant ping test measuring response latency in milliseconds.
+  - **Save & Apply**: Persists settings and immediately notifies the live mascot window without app restarts.
+- **Avatars**: Avatar catalog, sprite sheet inspector, and animation preview.
+- **Memory Explorer**: Search, inspect, and modify SQLite long-term memory entries.
+- **Husk Logs**: Monitor IPC daemon sockets, state machine transitions, and background events.
 
 ---
 
-## 🏛️ Архитектура проекта
+## 🏛️ System Architecture
 
 ```mermaid
 flowchart TD
     subgraph Frontend["Frontend (React 19 + TypeScript + Vite)"]
-        MW["MascotWindow (Оверлей маскота)"]
-        DW["DashboardWindow (Панель настроек)"]
-        UB["UnifiedBrain (Мультипровайдер)"]
+        MW["MascotWindow (Overlay Mascot)"]
+        DW["DashboardWindow (Control & Settings)"]
+        UB["UnifiedBrain (Provider Router)"]
         GB["GeminiBrain (@google/genai)"]
         DSB["DeepSeekBrain (OpenAI SSE)"]
-        SR["MascotSpriteRenderer (Спрайты и эмоции)"]
+        SR["MascotSpriteRenderer (Sprites & Emotes)"]
         
         MW --> SR
         MW --> UB
@@ -84,7 +84,7 @@ flowchart TD
 
     subgraph RustCore["Backend Core (Tauri v2 + Rust)"]
         IPC["Tauri IPC Commands (src/lib.rs)"]
-        PA["PlatformAdapter (Модуль Hands)"]
+        PA["PlatformAdapter (Hands Module)"]
         AI["AppIndexer (XDG Desktop Scanner)"]
         MS["MemoryStore (rusqlite)"]
         
@@ -94,12 +94,12 @@ flowchart TD
         PA --> AI
     end
 
-    subgraph OS["Операционная система (Linux / Desktop)"]
-        TERM["Эмулятор терминала (kitty, alacritty, etc.)"]
-        APPS["Приложения (Telegram, VSCode, Браузер)"]
+    subgraph OS["Operating System (Linux / Desktop)"]
+        TERM["Terminal Emulator (kitty, alacritty, etc.)"]
+        APPS["Target Apps (Telegram, VSCode, Browser)"]
         DB[(companion_memory.db)]
         
-        PA -->|Spawn process group| TERM
+        PA -->|Spawn process group (persistent)| TERM
         PA -->|gtk-launch / exec| APPS
         MS --> DB
     end
@@ -107,142 +107,146 @@ flowchart TD
 
 ---
 
-## 📂 Структура каталогов
+## 📂 Repository Structure
 
 ```
-companion/
-├── public/                 # Статические ресурсы, дефолтные спрайты и иконки
-│   └── avatars/            # Спрайт-листы и манифесты аватаров
-├── src/                    # Фронтенд-приложение (React 19 + TypeScript)
-│   ├── brain/              # Интеллект маскота и провайдеры нейросетей
-│   │   ├── index.ts        # UnifiedBrain (фасад с автопереключением)
-│   │   ├── gemini.ts       # Клиент Google Gemini API
-│   │   ├── deepseek.ts     # Клиент DeepSeek API (SSE, Reasoner CoT, Tools)
-│   │   ├── tools.ts        # Описания инструментов (Gemini & OpenAI schemas)
-│   │   ├── sanitizer.ts    # Фильтрация и очистка чувствительных данных
-│   │   └── system_prompt.ts# Системные инструкции для LLM
-│   ├── dashboard/          # Окно настроек, памяти и аватаров (DashboardWindow)
-│   ├── engine/             # Движок рендеринга спрайтов, физики и аватаров
-│   ├── mascot/             # Главное окно оверлея маскота (MascotWindow)
-│   ├── types/              # TypeScript интерфейсы и типы команд
-│   ├── App.tsx             # Мультиоконный роутер Tauri (?window=mascot|dashboard)
-│   └── main.tsx            # Точка входа React
-├── src-tauri/              # Бэкенд Tauri v2 на Rust
+FenBeta0/
+├── public/                 # Static assets, default avatar sprites and icons
+│   └── avatars/            # Avatar sprite sheets and manifest files
+├── src/                    # Frontend source (React 19 + TypeScript)
+│   ├── brain/              # AI Brain logic & providers
+│   │   ├── index.ts        # UnifiedBrain facade & dynamic router
+│   │   ├── gemini.ts       # Google Gemini SDK integration
+│   │   ├── deepseek.ts     # DeepSeek API integration (SSE streaming, CoT, Tools)
+│   │   ├── tools.ts        # Tool definitions (Gemini & OpenAI function schemas)
+│   │   ├── sanitizer.ts    # Input/Output sanitization
+│   │   └── system_prompt.ts# Dynamic system instructions & environment context
+│   ├── dashboard/          # Control center & settings window (DashboardWindow)
+│   ├── engine/             # Sprite renderer, physics, and avatar manager
+│   ├── mascot/             # Transparent overlay mascot window (MascotWindow)
+│   ├── types/              # Shared TypeScript interfaces & command types
+│   ├── App.tsx             # Multi-window entry router (?window=mascot|dashboard)
+│   └── main.tsx            # React application entrypoint
+├── src-tauri/              # Backend core (Tauri v2 + Rust)
 │   ├── src/
-│   │   ├── brain/          # SQLite MemoryStore для долговременной памяти
-│   │   ├── hands/          # Контроллер ОС (AppIndexer, terminal, URL, system info)
-│   │   ├── husk/           # Сокет-сервер фонового режима (Husk mode)
-│   │   ├── ipc/            # Обработчики IPC-вызовов Tauri
-│   │   ├── lib.rs          # Сборка приложения, регистрация команд и запуск
-│   │   └── main.rs         # Точка входа бинарника
-│   ├── Cargo.toml          # Зависимости Rust (tauri, rusqlite, tokio, etc.)
-│   └── tauri.conf.json     # Конфигурация окон, оверлея и сборщика Tauri
-├── package.json            # Зависимости Node.js
-├── vite.config.ts          # Конфигурация Vite
-└── README.md               # Документация проекта
+│   │   ├── brain/          # SQLite MemoryStore implementation
+│   │   ├── hands/          # OS controller (AppIndexer, terminal runner, system profile)
+│   │   ├── husk/           # Background daemon socket listener (Husk mode)
+│   │   ├── ipc/            # Tauri command IPC dispatchers
+│   │   ├── lib.rs          # App bootstrap, state management & handlers
+│   │   └── main.rs         # Binary entry point
+│   ├── Cargo.toml          # Rust dependencies (tauri, rusqlite, tokio, etc.)
+│   └── tauri.conf.json     # Multi-window & overlay window configuration
+├── package.json            # Node.js dependencies & scripts
+├── vite.config.ts          # Vite build configuration
+└── README.md               # Project documentation
 ```
 
 ---
 
-## 🛠️ Системные требования
+## 🛠️ Prerequisites & Dependencies
 
-- **ОС**: Linux (протестировано на Arch Linux, Ubuntu, Fedora; Wayland и X11)
+- **Operating System**: Linux (tested on Arch Linux, Ubuntu, Fedora; Wayland & X11 supported)
 - **Node.js**: `>= 18.0.0`
 - **npm**: `>= 9.0.0`
-- **Rust**: `>= 1.80.0` (с поддержкой `edition = "2024"`)
-- **Системные библиотеки Linux**:
-  ```bash
-  # Для систем на базе Debian/Ubuntu:
-  sudo apt-get update && sudo apt-get install -y \
-    libwebkit2gtk-4.1-dev \
-    build-essential \
-    curl \
-    wget \
-    file \
-    libxdo-dev \
-    libssl-dev \
-    libayatana-appindicator3-dev \
-    librsvg2-dev
+- **Rust**: `>= 1.80.0` (with `edition = "2024"` support)
 
-  # Для Arch Linux:
-  sudo pacman -S --needed \
-    webkit2gtk-4.1 \
-    base-devel \
-    curl \
-    wget \
-    file \
-    openssl
-  ```
+### System Libraries (Linux)
+
+#### Debian / Ubuntu
+```bash
+sudo apt-get update && sudo apt-get install -y \
+  libwebkit2gtk-4.1-dev \
+  build-essential \
+  curl \
+  wget \
+  file \
+  libxdo-dev \
+  libssl-dev \
+  libayatana-appindicator3-dev \
+  librsvg2-dev
+```
+
+#### Arch Linux
+```bash
+sudo pacman -S --needed \
+  webkit2gtk-4.1 \
+  base-devel \
+  curl \
+  wget \
+  file \
+  openssl
+```
 
 ---
 
-## 🚀 Установка и запуск
+## 🚀 Getting Started
 
-### 1. Клонирование репозитория
+### 1. Clone the Repository
 ```bash
-git clone https://github.com/your-username/companion.git
-cd companion
+git clone https://github.com/your-username/FenBeta0.git
+cd FenBeta0
 ```
 
-### 2. Установка зависимостей
+### 2. Install Node Dependencies
 ```bash
 npm install
 ```
 
-### 3. Запуск в режиме разработки
+### 3. Run in Development Mode
 ```bash
 npm run tauri dev
 ```
-Команда запускает локальный Vite dev-сервер (`http://localhost:1420`) и компилирует нативное приложение Tauri. На рабочем столе появится прозрачное оверлей-окно с маскотом.
+This boots the local Vite dev server (`http://localhost:1420`) and compiles the native Rust backend. The transparent mascot will appear directly on your desktop.
 
-### 4. Сборка для релиза
+### 4. Build for Production
 ```bash
 npm run tauri build
 ```
-Готовые исполняемые файлы и установочные пакеты (`.deb`, `.AppImage`) будут сгенерированы в каталоге `src-tauri/target/release/bundle/`.
+Production binaries and package bundles (`.deb`, `.AppImage`) will be generated inside `src-tauri/target/release/bundle/`.
 
 ---
 
-## ⚙️ Настройка провайдеров ИИ
+## ⚙️ AI Provider Configuration
 
-Настройки можно задать через интерфейс панели управления либо через переменные окружения:
+You can configure API credentials via the graphical Dashboard or with environment variables:
 
-### Вариант А: Через Dashboard (Рекомендуется)
-1. Откройте панель управления через контекстное меню маскота или сочетанием клавиш.
-2. Перейдите во вкладку **Settings** -> **AI Brain & API Providers**.
-3. Выберите активного провайдера (**Google Gemini** или **DeepSeek**).
-4. Вставьте ваш API-ключ:
-   - [Google AI Studio](https://aistudio.google.com/app/apikey) для Gemini.
-   - [DeepSeek Platform](https://platform.deepseek.com/api_keys) для DeepSeek.
-5. Нажмите кнопку **Test Connection** для мгновенной проверки соединения.
-6. Нажмите **Save & Apply** — параметры сразу вступят в силу без перезапуска приложения.
+### Option A: Via Dashboard (Recommended)
+1. Open the companion Dashboard via the mascot's context menu or keyboard shortcut.
+2. Navigate to **Settings** -> **AI Brain & API Providers**.
+3. Choose your active provider (**Google Gemini** or **DeepSeek**).
+4. Enter your API key:
+   - [Google AI Studio](https://aistudio.google.com/app/apikey) for Gemini.
+   - [DeepSeek Platform](https://platform.deepseek.com/api_keys) for DeepSeek.
+5. Click **Test Connection** for an instant latency ping check.
+6. Click **Save & Apply** — changes take effect immediately across all windows without restarting.
 
-### Вариант Б: Через файл `.env`
-Создайте файл `.env` в корне проекта:
+### Option B: Via `.env` File
+Create a `.env` file in the project root:
 ```env
-# Google Gemini
+# Google Gemini API Key
 VITE_GEMINI_API_KEY="AIzaSy..."
 
-# DeepSeek
+# DeepSeek API Key
 VITE_DEEPSEEK_API_KEY="sk-..."
 ```
 
 ---
 
-## 🧪 Тестирование и верификация кода
+## 🧪 Testing & Verification
 
-Для запуска проверки типизации и сборки фронтенда:
+Run the TypeScript type check and frontend production build:
 ```bash
 npm run build
 ```
 
-Для запуска тестов Rust-бэкенда (индексатор приложений, обнаружение терминалов, системный профиль):
+Run Rust core unit tests (application indexer, terminal detection, system profile):
 ```bash
 cargo test --manifest-path src-tauri/Cargo.toml
 ```
 
 ---
 
-## 📄 Лицензия
+## 📄 License
 
-Проект распространяется под свободной лицензией **GNU General Public License v3.0 (GPL-3.0)**. Подробности см. в файле [LICENSE](LICENSE).
+FenBeta0 is distributed under the **GNU General Public License v3.0 (GPL-3.0)**. See the [LICENSE](LICENSE) file for details.
