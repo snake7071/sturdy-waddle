@@ -110,7 +110,7 @@ export const MascotSpriteRenderer: React.FC<MascotSpriteRendererProps> = ({ stat
         alt={manifest.name}
         data-tauri-drag-region
         draggable={false}
-        className="w-full h-full object-contain pointer-events-none select-none drop-shadow-2xl"
+        className="w-full h-full object-contain pointer-events-auto select-none drop-shadow-2xl cursor-grab active:cursor-grabbing"
         style={{
           imageRendering: "auto",
         }}

@@ -5,6 +5,13 @@
   "windows": ["mascot", "dashboard", "main", "*"],
   "permissions": [
     "core:default",
+    "core:window:default",
+    "core:window:allow-start-dragging",
+    "core:window:allow-set-position",
+    "core:window:allow-set-focus",
+    "core:window:allow-show",
+    "core:window:allow-hide",
+    "core:window:allow-close",
     "opener:default"
   ]
 }

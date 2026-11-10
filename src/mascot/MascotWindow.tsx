@@ -81,6 +81,15 @@ export const MascotWindow: React.FC = () => {
   const handleMouseDown = async (e: React.MouseEvent) => {
     const target = e.target as HTMLElement;
     if (
+      target.closest("button") ||
+      target.closest("input") ||
+      target.closest("textarea") ||
+      target.closest(".no-drag")
+    ) {
+      return;
+    }
+
+    if (
       e.button === 0 &&
       (target.tagName === "CANVAS" ||
         target.tagName === "IMG" ||
@@ -379,7 +388,7 @@ export const MascotWindow: React.FC = () => {
       )}
 
       {/* Mascot Sprite Renderer */}
-      <div className="relative">
+      <div className="relative" data-tauri-drag-region>
         <MascotSpriteRenderer state={avatarState} />
       </div>
 
