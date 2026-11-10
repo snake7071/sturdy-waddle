@@ -1116,7 +1116,9 @@ export const DashboardWindow: React.FC = () => {
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
                 {installedAvatars.map((avatar) => {
                   const isActive = avatar.id === activeAvatarId;
-                  const isDefault = avatar.id === DEFAULT_AVATAR_ID;
+                  const isDefault =
+                    avatar.id === DEFAULT_AVATAR_ID ||
+                    avatar.id === "default-anime-companion";
 
                   return (
                     <div

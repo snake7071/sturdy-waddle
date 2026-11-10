@@ -5,10 +5,12 @@
 
 import { emit } from "@tauri-apps/api/event";
 import { AvatarManifest } from "../types/avatar";
+import defaultAvatarGif from "../assets/ezgif-75083ad0293d8d70.gif";
 
 export const STORAGE_KEY_AVATARS = "installed_avatars";
 export const STORAGE_KEY_ACTIVE = "active_avatar_id";
-export const DEFAULT_AVATAR_ID = "default-anime-companion";
+export const DEFAULT_AVATAR_ID = "ezgif-75083ad0293d8d70";
+export const AOI_AVATAR_ID = "default-anime-companion";
 
 const IDB_NAME = "companion_avatars_db";
 const IDB_VERSION = 1;
@@ -339,10 +341,28 @@ const defaultNeedsApprovalSvg = svgToDataUri(createAnimeGirlSvg("needs_approval"
 const defaultGlitchSvg = svgToDataUri(createAnimeGirlSvg("glitch"));
 
 /**
- * Built-in Cute Anime Girl companion avatar
+ * Built-in default avatar: ezgif animated companion
  */
 export const DEFAULT_AVATAR: AvatarManifest = {
   id: DEFAULT_AVATAR_ID,
+  name: "ezgif-75083ad0293d8d70",
+  type: "animated-gif",
+  preview: defaultAvatarGif,
+  sprites: {
+    idle: defaultAvatarGif,
+    talking: defaultAvatarGif,
+    working: defaultAvatarGif,
+    error: defaultAvatarGif,
+    needs_approval: defaultAvatarGif,
+    glitch: defaultAvatarGif,
+  },
+};
+
+/**
+ * Built-in Anime Girl companion avatar (Aoi)
+ */
+export const AOI_AVATAR: AvatarManifest = {
+  id: AOI_AVATAR_ID,
   name: "Aoi (Anime Companion)",
   type: "2d-sprites",
   preview: defaultIdleSvg,
@@ -386,15 +406,21 @@ export class AvatarManager {
       }
 
       if (list.length === 0) {
-        list = [DEFAULT_AVATAR];
+        list = [DEFAULT_AVATAR, AOI_AVATAR];
         try {
           localStorage.setItem(STORAGE_KEY_AVATARS, JSON.stringify(list));
         } catch {}
       }
 
-      const hasDefault = list.some((a) => a.id === DEFAULT_AVATAR.id);
-      if (!hasDefault) {
+      const defaultIdx = list.findIndex((a) => a.id === DEFAULT_AVATAR.id);
+      if (defaultIdx === -1) {
         list.unshift(DEFAULT_AVATAR);
+      } else {
+        list[defaultIdx] = DEFAULT_AVATAR;
+      }
+
+      if (!list.some((a) => a.id === AOI_AVATAR.id)) {
+        list.push(AOI_AVATAR);
       }
 
       this.inMemoryAvatars = list;
@@ -407,7 +433,7 @@ export class AvatarManager {
       return this.inMemoryAvatars;
     } catch (err) {
       console.warn("[AvatarManager] Failed reading installed avatars:", err);
-      this.inMemoryAvatars = [DEFAULT_AVATAR];
+      this.inMemoryAvatars = [DEFAULT_AVATAR, AOI_AVATAR];
       return this.inMemoryAvatars;
     }
   }
@@ -419,11 +445,12 @@ export class AvatarManager {
     this.idbSynced = true;
     try {
       const idbList = await idbGetAllAvatars();
-      const current = this.inMemoryAvatars || [DEFAULT_AVATAR];
+      const current = this.inMemoryAvatars || [DEFAULT_AVATAR, AOI_AVATAR];
 
       // Merge IndexedDB items into current (IndexedDB items take precedence since they contain full Data URLs)
       const map = new Map<string, AvatarManifest>();
       map.set(DEFAULT_AVATAR.id, DEFAULT_AVATAR);
+      map.set(AOI_AVATAR.id, AOI_AVATAR);
 
       for (const item of current) {
         map.set(item.id, item);
@@ -442,7 +469,7 @@ export class AvatarManager {
       return this.inMemoryAvatars;
     } catch (err) {
       console.warn("[AvatarManager] Error syncing from IndexedDB:", err);
-      return this.inMemoryAvatars || [DEFAULT_AVATAR];
+      return this.inMemoryAvatars || [DEFAULT_AVATAR, AOI_AVATAR];
     }
   }
 
@@ -450,7 +477,11 @@ export class AvatarManager {
    * Returns the active avatar ID.
    */
   public static getActiveAvatarId(): string {
-    return localStorage.getItem(STORAGE_KEY_ACTIVE) || DEFAULT_AVATAR_ID;
+    const saved = localStorage.getItem(STORAGE_KEY_ACTIVE);
+    if (!saved || saved === "default-anime-companion") {
+      return DEFAULT_AVATAR_ID;
+    }
+    return saved;
   }
 
   /**
@@ -469,6 +500,7 @@ export class AvatarManager {
   public static async getActiveAvatarAsync(): Promise<AvatarManifest> {
     const activeId = this.getActiveAvatarId();
     if (activeId === DEFAULT_AVATAR_ID) return DEFAULT_AVATAR;
+    if (activeId === AOI_AVATAR_ID) return AOI_AVATAR;
 
     // Check memory first
     if (this.inMemoryAvatars) {
@@ -497,7 +529,7 @@ export class AvatarManager {
     const installed = this.getInstalledAvatars();
     let avatar = installed.find((a) => a.id === id);
 
-    if (!avatar && id !== DEFAULT_AVATAR_ID) {
+    if (!avatar && id !== DEFAULT_AVATAR_ID && id !== AOI_AVATAR_ID) {
       avatar = (await idbGetAvatar(id)) || undefined;
     }
 
@@ -587,8 +619,8 @@ export class AvatarManager {
    * Deletes a custom avatar. Cannot delete the default avatar.
    */
   public static async deleteAvatar(id: string): Promise<boolean> {
-    if (id === DEFAULT_AVATAR_ID) {
-      console.warn("[AvatarManager] Cannot delete default avatar.");
+    if (id === DEFAULT_AVATAR_ID || id === AOI_AVATAR_ID) {
+      console.warn("[AvatarManager] Cannot delete built-in avatar.");
       return false;
     }
 

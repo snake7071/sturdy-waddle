@@ -6,7 +6,7 @@
 export interface AvatarManifest {
   id: string;
   name: string;
-  type: "2d-sprites" | "3d-vrm";
+  type: "2d-sprites" | "animated-gif" | "3d-vrm";
   preview: string; // base64 Data URL or SVG string
   sprites: {
     idle: string;
