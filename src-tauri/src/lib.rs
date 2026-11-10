@@ -37,8 +37,15 @@ pub fn run() {
             let app_handle = app.handle().clone();
 
             // 1. Initialize SQLite Long-Term Memory Store
-            let mut db_path = std::env::temp_dir();
-            db_path.push("companion_memory.db");
+            let db_path = if let Ok(data_dir) = app.path().app_data_dir() {
+                let _ = std::fs::create_dir_all(&data_dir);
+                data_dir.join("companion_memory.db")
+            } else {
+                let mut p = std::env::temp_dir();
+                p.push("companion_memory.db");
+                p
+            };
+            println!("[MemoryStore] SQLite path: {:?}", db_path);
             let memory_store = Arc::new(
                 MemoryStore::new(db_path.to_str().unwrap_or("companion_memory.db"))
                     .expect("Failed to initialize SQLite memory database"),
@@ -85,6 +92,9 @@ pub fn run() {
             ipc::execute_sandboxed_shell,
             ipc::save_memory_entry,
             ipc::search_memory,
+            ipc::get_all_memories,
+            ipc::delete_memory,
+            ipc::get_relevant_memory_context,
             ipc::set_window_clickthrough,
             ipc::capture_screen_snapshot,
             show_dashboard,

@@ -66,8 +66,19 @@ export const DashboardWindow: React.FC = () => {
   const [userName, setUserName] = useState(() => localStorage.getItem("companion_user_name") || "Developer");
   const [savedStatus, setSavedStatus] = useState("");
 
+  // Memory Editor State
   const [memoryQuery, setMemoryQuery] = useState("");
   const [memories, setMemories] = useState<MemoryItem[]>([]);
+  const [selectedCategory, setSelectedCategory] = useState<string>("all");
+  const [isAddMemoryOpen, setIsAddMemoryOpen] = useState(false);
+  const [newMemoryCategory, setNewMemoryCategory] = useState<string>("fact");
+  const [newMemoryKey, setNewMemoryKey] = useState("");
+  const [newMemoryContent, setNewMemoryContent] = useState("");
+  const [newMemoryTags, setNewMemoryTags] = useState("");
+  const [editingMemoryId, setEditingMemoryId] = useState<number | null>(null);
+  const [editContent, setEditContent] = useState("");
+  const [editTags, setEditTags] = useState("");
+  const [memoryStatus, setMemoryStatus] = useState("");
   const [huskLogs, setHuskLogs] = useState<HuskLog[]>([]);
 
   // System Context & App Indexer State
@@ -126,6 +137,11 @@ export const DashboardWindow: React.FC = () => {
         }
       })
       .catch((err) => console.warn("Failed to load system context:", err));
+
+    // 0.1 Fetch initial SQLite Long-Term Memories
+    invoke<MemoryItem[]>("get_all_memories")
+      .then((items) => setMemories(items))
+      .catch((err) => console.warn("Failed to load initial memories:", err));
 
     // 1. Initial hydration from IndexedDB for large custom avatars
     AvatarManager.syncFromIndexedDB().then((list) => {
@@ -262,12 +278,106 @@ export const DashboardWindow: React.FC = () => {
     setTimeout(() => setSavedStatus(""), 3500);
   };
 
+  const loadAllMemories = async () => {
+    try {
+      const results: MemoryItem[] = await invoke("get_all_memories");
+      setMemories(results);
+    } catch (e: any) {
+      console.error("Failed to load memories:", e);
+    }
+  };
+
   const handleSearchMemory = async () => {
     try {
-      const results: MemoryItem[] = await invoke("search_memory", { query: memoryQuery });
+      if (!memoryQuery.trim()) {
+        await loadAllMemories();
+        return;
+      }
+      const results: MemoryItem[] = await invoke("search_memory", { query: memoryQuery.trim() });
       setMemories(results);
     } catch (e: any) {
       console.error("Memory search failed:", e);
+    }
+  };
+
+  const handleSaveNewMemory = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newMemoryKey.trim() || !newMemoryContent.trim()) {
+      setMemoryStatus("Пожалуйста, заполните ключ и содержание.");
+      setTimeout(() => setMemoryStatus(""), 3500);
+      return;
+    }
+    try {
+      const tags = newMemoryTags
+        .split(",")
+        .map((t) => t.trim().toLowerCase())
+        .filter(Boolean);
+
+      const item: MemoryItem = {
+        key: newMemoryKey.trim().toLowerCase().replace(/\s+/g, "_"),
+        category: newMemoryCategory,
+        content: newMemoryContent.trim(),
+        tags: tags.length > 0 ? tags : [newMemoryCategory],
+        updated_at: Math.floor(Date.now() / 1000),
+      };
+
+      await invoke("save_memory_entry", { item });
+      setMemoryStatus(`Знание "${item.key}" успешно сохранено в SQLite! 🧠✨`);
+      setNewMemoryKey("");
+      setNewMemoryContent("");
+      setNewMemoryTags("");
+      setIsAddMemoryOpen(false);
+      await loadAllMemories();
+      setTimeout(() => setMemoryStatus(""), 3500);
+    } catch (err: any) {
+      setMemoryStatus(`Ошибка сохранения: ${err?.message || err}`);
+      setTimeout(() => setMemoryStatus(""), 4000);
+    }
+  };
+
+  const handleDeleteMemory = async (id?: number, key?: string) => {
+    if (!id && !key) return;
+    try {
+      if (id) {
+        await invoke("delete_memory", { id });
+      }
+      setMemoryStatus(`Запись "${key || id}" удалена из базы.`);
+      await loadAllMemories();
+      setTimeout(() => setMemoryStatus(""), 3500);
+    } catch (err: any) {
+      setMemoryStatus(`Ошибка удаления: ${err?.message || err}`);
+      setTimeout(() => setMemoryStatus(""), 4000);
+    }
+  };
+
+  const handleStartEdit = (m: MemoryItem) => {
+    setEditingMemoryId(m.id ?? null);
+    setEditContent(m.content);
+    setEditTags(m.tags ? m.tags.join(", ") : "");
+  };
+
+  const handleSaveEdit = async (m: MemoryItem) => {
+    try {
+      const tags = editTags
+        .split(",")
+        .map((t) => t.trim().toLowerCase())
+        .filter(Boolean);
+
+      const updated: MemoryItem = {
+        ...m,
+        content: editContent.trim(),
+        tags,
+        updated_at: Math.floor(Date.now() / 1000),
+      };
+
+      await invoke("save_memory_entry", { item: updated });
+      setEditingMemoryId(null);
+      setMemoryStatus(`Запись "${m.key}" успешно обновлена.`);
+      await loadAllMemories();
+      setTimeout(() => setMemoryStatus(""), 3500);
+    } catch (err: any) {
+      setMemoryStatus(`Ошибка обновления: ${err?.message || err}`);
+      setTimeout(() => setMemoryStatus(""), 4000);
     }
   };
 
@@ -536,7 +646,7 @@ export const DashboardWindow: React.FC = () => {
             <button
               onClick={() => {
                 setActiveTab("memory");
-                handleSearchMemory();
+                loadAllMemories();
               }}
               className={`w-full text-left px-3 py-2 rounded-lg text-xs font-medium transition-colors ${
                 activeTab === "memory"
@@ -544,7 +654,7 @@ export const DashboardWindow: React.FC = () => {
                   : "text-slate-400 hover:bg-slate-800 hover:text-slate-200"
               }`}
             >
-              🧠 Long-Term Memory (SQLite)
+              🧠 Memory
             </button>
             <button
               onClick={() => setActiveTab("husk")}
@@ -1402,48 +1512,484 @@ export const DashboardWindow: React.FC = () => {
 
         {/* Memory Tab */}
         {activeTab === "memory" && (
-          <div className="space-y-4">
-            <div>
-              <h2 className="text-lg font-bold text-slate-100">SQLite Memory Explorer</h2>
-              <p className="text-xs text-slate-400">
-                Persistent facts, project memory, and compaction summaries stored via rusqlite.
-              </p>
-            </div>
+          <div className="space-y-5">
+            {/* Header */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-4">
+              <div>
+                <h2 className="text-lg font-bold text-slate-100 flex items-center gap-2">
+                  <span>🧠</span> Memory & Knowledge Base
+                </h2>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Долгосрочная база фактов SQLite (<code className="text-cyan-400">companion_memory.db</code>).
+                  Ассистент автоматически учитывает эти правила и факты в каждом запросе.
+                </p>
+              </div>
 
-            <div className="flex gap-2">
-              <input
-                type="text"
-                value={memoryQuery}
-                onChange={(e) => setMemoryQuery(e.target.value)}
-                placeholder="Search memories or tags..."
-                className="flex-1 bg-slate-900 border border-slate-800 text-xs px-3 py-2 rounded-lg focus:border-cyan-400 outline-none font-mono"
-                onKeyDown={(e) => e.key === "Enter" && handleSearchMemory()}
-              />
               <button
-                onClick={handleSearchMemory}
-                className="bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs px-3 py-2 rounded-lg border border-slate-700"
+                onClick={() => setIsAddMemoryOpen((prev) => !prev)}
+                className={`text-xs px-3.5 py-2 rounded-lg font-medium transition-all flex items-center gap-1.5 shadow-sm ${
+                  isAddMemoryOpen
+                    ? "bg-slate-800 text-slate-300 border border-slate-700"
+                    : "bg-cyan-600 hover:bg-cyan-500 text-white shadow-cyan-600/20"
+                }`}
               >
-                Search
+                <span>{isAddMemoryOpen ? "✕" : "+"}</span>
+                <span>{isAddMemoryOpen ? "Скрыть форму" : "Добавить знание"}</span>
               </button>
             </div>
 
-            <div className="space-y-2">
-              {memories.length === 0 ? (
-                <div className="bg-slate-900/40 border border-slate-800/80 rounded-xl p-6 text-center text-xs text-slate-500">
-                  No memories indexed yet. The companion accumulates facts and summaries during conversations.
+            {/* Notification alert */}
+            {memoryStatus && (
+              <div className="bg-cyan-950/60 border border-cyan-500/40 text-cyan-300 text-xs px-3.5 py-2.5 rounded-lg flex items-center justify-between animate-fadeIn">
+                <span className="flex items-center gap-2">
+                  <span>ℹ️</span>
+                  <span>{memoryStatus}</span>
+                </span>
+                <button
+                  onClick={() => setMemoryStatus("")}
+                  className="text-cyan-400 hover:text-cyan-200 text-sm ml-2"
+                >
+                  ✕
+                </button>
+              </div>
+            )}
+
+            {/* Stats Overview Counters */}
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5">
+              <div
+                onClick={() => setSelectedCategory("all")}
+                className={`p-2.5 rounded-xl border text-xs cursor-pointer transition-all ${
+                  selectedCategory === "all"
+                    ? "bg-slate-800 border-cyan-500/50 shadow-sm shadow-cyan-500/10"
+                    : "bg-slate-900/60 border-slate-800/80 hover:bg-slate-800/50"
+                }`}
+              >
+                <div className="text-[10px] text-slate-400 uppercase tracking-wider font-semibold">Всего</div>
+                <div className="text-base font-bold text-slate-100 mt-0.5">{memories.length}</div>
+              </div>
+
+              <div
+                onClick={() => setSelectedCategory("preference")}
+                className={`p-2.5 rounded-xl border text-xs cursor-pointer transition-all ${
+                  selectedCategory === "preference"
+                    ? "bg-emerald-950/40 border-emerald-500/50"
+                    : "bg-slate-900/60 border-slate-800/80 hover:bg-slate-800/50"
+                }`}
+              >
+                <div className="text-[10px] text-emerald-400 uppercase tracking-wider font-semibold flex items-center gap-1">
+                  <span>🛡️</span> Правила
                 </div>
-              ) : (
-                memories.map((m, idx) => (
-                  <div key={idx} className="bg-slate-900 p-3 rounded-lg border border-slate-800 text-xs">
-                    <div className="flex justify-between items-center text-[10px] text-cyan-400 mb-1">
-                      <span className="font-mono">{m.category.toUpperCase()} // {m.key}</span>
-                      <span className="text-slate-500">{new Date(m.updated_at * 1000).toLocaleString()}</span>
-                    </div>
-                    <p className="text-slate-200">{m.content}</p>
-                  </div>
-                ))
-              )}
+                <div className="text-base font-bold text-emerald-300 mt-0.5">
+                  {memories.filter((m) => m.category === "preference" || m.category === "profile").length}
+                </div>
+              </div>
+
+              <div
+                onClick={() => setSelectedCategory("fact")}
+                className={`p-2.5 rounded-xl border text-xs cursor-pointer transition-all ${
+                  selectedCategory === "fact"
+                    ? "bg-cyan-950/40 border-cyan-500/50"
+                    : "bg-slate-900/60 border-slate-800/80 hover:bg-slate-800/50"
+                }`}
+              >
+                <div className="text-[10px] text-cyan-400 uppercase tracking-wider font-semibold flex items-center gap-1">
+                  <span>💡</span> Факты
+                </div>
+                <div className="text-base font-bold text-cyan-300 mt-0.5">
+                  {memories.filter((m) => m.category === "fact").length}
+                </div>
+              </div>
+
+              <div
+                onClick={() => setSelectedCategory("project")}
+                className={`p-2.5 rounded-xl border text-xs cursor-pointer transition-all ${
+                  selectedCategory === "project"
+                    ? "bg-amber-950/40 border-amber-500/50"
+                    : "bg-slate-900/60 border-slate-800/80 hover:bg-slate-800/50"
+                }`}
+              >
+                <div className="text-[10px] text-amber-400 uppercase tracking-wider font-semibold flex items-center gap-1">
+                  <span>📁</span> Проекты
+                </div>
+                <div className="text-base font-bold text-amber-300 mt-0.5">
+                  {memories.filter((m) => m.category === "project").length}
+                </div>
+              </div>
+
+              <div
+                onClick={() => setSelectedCategory("summary")}
+                className={`p-2.5 rounded-xl border text-xs cursor-pointer transition-all ${
+                  selectedCategory === "summary"
+                    ? "bg-purple-950/40 border-purple-500/50"
+                    : "bg-slate-900/60 border-slate-800/80 hover:bg-slate-800/50"
+                }`}
+              >
+                <div className="text-[10px] text-purple-400 uppercase tracking-wider font-semibold flex items-center gap-1">
+                  <span>📝</span> Сводки
+                </div>
+                <div className="text-base font-bold text-purple-300 mt-0.5">
+                  {memories.filter((m) => m.category === "summary").length}
+                </div>
+              </div>
             </div>
+
+            {/* Add Memory Form Modal / Inline Collapsible */}
+            {isAddMemoryOpen && (
+              <form
+                onSubmit={handleSaveNewMemory}
+                className="bg-slate-900 border border-cyan-500/30 rounded-xl p-4 space-y-3.5 shadow-lg shadow-cyan-950/20"
+              >
+                <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                  <h3 className="text-xs font-bold text-cyan-300 uppercase tracking-wider flex items-center gap-1.5">
+                    <span>✨</span> Добавить новое правило или факт в SQLite
+                  </h3>
+                  <button
+                    type="button"
+                    onClick={() => setIsAddMemoryOpen(false)}
+                    className="text-slate-400 hover:text-slate-200 text-xs"
+                  >
+                    Отмена
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[11px] text-slate-300 font-medium mb-1">Категория</label>
+                    <select
+                      value={newMemoryCategory}
+                      onChange={(e) => setNewMemoryCategory(e.target.value)}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-lg text-xs px-3 py-2 text-slate-200 focus:border-cyan-400 outline-none"
+                    >
+                      <option value="preference">🛡️ Правило / Предпочтение (preference)</option>
+                      <option value="fact">💡 Факт о пользователе (fact)</option>
+                      <option value="project">📁 Заметка по проекту (project)</option>
+                      <option value="profile">👤 Профиль пользователя (profile)</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] text-slate-300 font-medium mb-1">
+                      Ключ идентификатора (snake_case)
+                    </label>
+                    <input
+                      type="text"
+                      value={newMemoryKey}
+                      onChange={(e) => setNewMemoryKey(e.target.value)}
+                      placeholder="например: backend_rust или no_emojis"
+                      className="w-full bg-slate-950 border border-slate-800 rounded-lg text-xs px-3 py-2 text-slate-200 focus:border-cyan-400 outline-none font-mono"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-[11px] text-slate-300 font-medium mb-1">
+                    Содержание факта или правила
+                  </label>
+                  <textarea
+                    rows={2}
+                    value={newMemoryContent}
+                    onChange={(e) => setNewMemoryContent(e.target.value)}
+                    placeholder="например: 'Я пишу бекенд на Rust' или 'Не используй эмодзи в ответах'"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg text-xs px-3 py-2 text-slate-200 focus:border-cyan-400 outline-none resize-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] text-slate-300 font-medium mb-1">
+                    Теги (через запятую, опционально)
+                  </label>
+                  <input
+                    type="text"
+                    value={newMemoryTags}
+                    onChange={(e) => setNewMemoryTags(e.target.value)}
+                    placeholder="например: rust, backend, axum"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg text-xs px-3 py-2 text-slate-200 focus:border-cyan-400 outline-none font-mono"
+                  />
+                </div>
+
+                <div className="flex justify-end gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => setIsAddMemoryOpen(false)}
+                    className="px-3 py-1.5 text-xs text-slate-400 hover:text-slate-200"
+                  >
+                    Отмена
+                  </button>
+                  <button
+                    type="submit"
+                    className="bg-cyan-600 hover:bg-cyan-500 text-white text-xs px-4 py-1.5 rounded-lg font-bold shadow-md shadow-cyan-600/20 active:scale-95"
+                  >
+                    💾 Сохранить в память
+                  </button>
+                </div>
+              </form>
+            )}
+
+            {/* Search Bar & Filter Pills */}
+            <div className="flex flex-col sm:flex-row gap-2.5">
+              <div className="relative flex-1">
+                <input
+                  type="text"
+                  value={memoryQuery}
+                  onChange={(e) => setMemoryQuery(e.target.value)}
+                  placeholder="Поиск по ключу, тексту факта или тегам..."
+                  className="w-full bg-slate-900 border border-slate-800 text-xs px-3 py-2.5 rounded-lg focus:border-cyan-400 outline-none font-mono text-slate-200 pr-16"
+                  onKeyDown={(e) => e.key === "Enter" && handleSearchMemory()}
+                />
+                {memoryQuery && (
+                  <button
+                    onClick={() => {
+                      setMemoryQuery("");
+                      loadAllMemories();
+                    }}
+                    className="absolute right-2 top-2.5 text-slate-500 hover:text-slate-300 text-xs px-1"
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
+
+              <div className="flex gap-2">
+                <button
+                  onClick={handleSearchMemory}
+                  className="bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs px-4 py-2.5 rounded-lg border border-slate-700 font-medium"
+                >
+                  Найти
+                </button>
+                <button
+                  onClick={() => {
+                    setMemoryQuery("");
+                    loadAllMemories();
+                  }}
+                  className="bg-slate-800/60 hover:bg-slate-800 text-slate-400 hover:text-slate-200 text-xs px-3 py-2.5 rounded-lg border border-slate-800"
+                  title="Обновить список"
+                >
+                  🔄
+                </button>
+              </div>
+            </div>
+
+            {/* Cards List */}
+            {(() => {
+              const filtered = memories.filter((m) => {
+                const matchesCategory =
+                  selectedCategory === "all" ||
+                  (selectedCategory === "preference" &&
+                    (m.category === "preference" || m.category === "profile")) ||
+                  m.category === selectedCategory;
+
+                const q = memoryQuery.trim().toLowerCase();
+                const matchesQuery =
+                  !q ||
+                  m.key.toLowerCase().includes(q) ||
+                  m.content.toLowerCase().includes(q) ||
+                  m.tags?.some((t) => t.toLowerCase().includes(q));
+
+                return matchesCategory && matchesQuery;
+              });
+
+              if (filtered.length === 0) {
+                return (
+                  <div className="bg-slate-900/40 border border-slate-800/80 rounded-xl p-8 text-center text-xs text-slate-500 space-y-3">
+                    <div className="text-2xl">🧠</div>
+                    <p className="text-slate-400 font-medium">
+                      {memoryQuery
+                        ? "По вашему запросу ничего не найдено."
+                        : "В базе SQLite пока нет сохраненных воспоминаний."}
+                    </p>
+                    <p className="text-[11px] text-slate-500 max-w-md mx-auto">
+                      Вы можете добавить факты вручную или сказать маскоту в диалоге, например:
+                      «Я пишу бекенд на Rust» или «Не используй эмодзи» — и модель автоматически использует системный инструмент <code>save_memory</code>.
+                    </p>
+                    <div className="flex flex-wrap justify-center gap-2 pt-2">
+                      <button
+                        onClick={async () => {
+                          const item: MemoryItem = {
+                            key: "no_emojis",
+                            category: "preference",
+                            content: "Не использовать эмодзи в ответах ассистента",
+                            tags: ["rules", "formatting"],
+                            updated_at: Math.floor(Date.now() / 1000),
+                          };
+                          await invoke("save_memory_entry", { item });
+                          await loadAllMemories();
+                          setMemoryStatus("Добавлено правило: Не использовать эмодзи! 🛡️");
+                        }}
+                        className="bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs px-3 py-1.5 rounded-lg border border-slate-700"
+                      >
+                        + Пример: Не использовать эмодзи
+                      </button>
+                      <button
+                        onClick={async () => {
+                          const item: MemoryItem = {
+                            key: "backend_rust",
+                            category: "fact",
+                            content: "Пользователь разрабатывает бекенд на Rust с использованием Tokio",
+                            tags: ["rust", "backend", "skills"],
+                            updated_at: Math.floor(Date.now() / 1000),
+                          };
+                          await invoke("save_memory_entry", { item });
+                          await loadAllMemories();
+                          setMemoryStatus("Добавлен факт: Разработка на Rust! 🦀");
+                        }}
+                        className="bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs px-3 py-1.5 rounded-lg border border-slate-700"
+                      >
+                        + Пример: Бекенд на Rust
+                      </button>
+                    </div>
+                  </div>
+                );
+              }
+
+              return (
+                <div className="grid grid-cols-1 gap-3">
+                  {filtered.map((m) => {
+                    const isPref = m.category === "preference" || m.category === "profile";
+                    const isFact = m.category === "fact";
+                    const isProj = m.category === "project";
+                    const isSumm = m.category === "summary";
+
+                    const badgeStyle = isPref
+                      ? "bg-emerald-500/10 text-emerald-300 border-emerald-500/30"
+                      : isFact
+                      ? "bg-cyan-500/10 text-cyan-300 border-cyan-500/30"
+                      : isProj
+                      ? "bg-amber-500/10 text-amber-300 border-amber-500/30"
+                      : isSumm
+                      ? "bg-purple-500/10 text-purple-300 border-purple-500/30"
+                      : "bg-slate-800 text-slate-300 border-slate-700";
+
+                    const badgeIcon = isPref ? "🛡️" : isFact ? "💡" : isProj ? "📁" : isSumm ? "📝" : "📌";
+                    const badgeLabel = isPref
+                      ? "Правило"
+                      : isFact
+                      ? "Факт"
+                      : isProj
+                      ? "Проект"
+                      : isSumm
+                      ? "Сводка"
+                      : m.category;
+
+                    const isEditing = editingMemoryId === m.id;
+
+                    return (
+                      <div
+                        key={m.id || m.key}
+                        className="bg-slate-900 border border-slate-800 hover:border-slate-700/80 rounded-xl p-3.5 transition-all space-y-2.5 shadow-sm"
+                      >
+                        {/* Card Top Row */}
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span
+                              className={`text-[10px] uppercase font-bold px-2 py-0.5 rounded-md border flex items-center gap-1 ${badgeStyle}`}
+                            >
+                              <span>{badgeIcon}</span>
+                              <span>{badgeLabel}</span>
+                            </span>
+                            <span className="font-mono text-xs font-semibold text-slate-200">
+                              {m.key}
+                            </span>
+                          </div>
+
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] text-slate-500 font-mono">
+                              {new Date(m.updated_at * 1000).toLocaleString("ru-RU", {
+                                day: "2-digit",
+                                month: "2-digit",
+                                year: "numeric",
+                                hour: "2-digit",
+                                minute: "2-digit",
+                              })}
+                            </span>
+
+                            {!isEditing && (
+                              <div className="flex items-center gap-1 ml-1">
+                                <button
+                                  onClick={() => handleStartEdit(m)}
+                                  className="text-slate-400 hover:text-cyan-300 p-1 rounded hover:bg-slate-800 text-xs transition-colors"
+                                  title="Редактировать"
+                                >
+                                  ✏️
+                                </button>
+                                <button
+                                  onClick={() => handleDeleteMemory(m.id, m.key)}
+                                  className="text-slate-400 hover:text-red-400 p-1 rounded hover:bg-slate-800 text-xs transition-colors"
+                                  title="Удалить"
+                                >
+                                  🗑️
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Card Content */}
+                        {isEditing ? (
+                          <div className="space-y-2 pt-1 border-t border-slate-800">
+                            <div>
+                              <label className="text-[10px] text-slate-400 block mb-0.5">Содержание</label>
+                              <textarea
+                                rows={2}
+                                value={editContent}
+                                onChange={(e) => setEditContent(e.target.value)}
+                                className="w-full bg-slate-950 border border-slate-800 rounded-lg text-xs p-2 text-slate-200 focus:border-cyan-400 outline-none resize-none font-sans"
+                              />
+                            </div>
+                            <div>
+                              <label className="text-[10px] text-slate-400 block mb-0.5">
+                                Теги (через запятую)
+                              </label>
+                              <input
+                                type="text"
+                                value={editTags}
+                                onChange={(e) => setEditTags(e.target.value)}
+                                className="w-full bg-slate-950 border border-slate-800 rounded-lg text-xs px-2 py-1 text-slate-200 focus:border-cyan-400 outline-none font-mono"
+                              />
+                            </div>
+                            <div className="flex justify-end gap-2 pt-1">
+                              <button
+                                onClick={() => setEditingMemoryId(null)}
+                                className="px-2.5 py-1 text-xs text-slate-400 hover:text-slate-200"
+                              >
+                                Отмена
+                              </button>
+                              <button
+                                onClick={() => handleSaveEdit(m)}
+                                className="bg-cyan-600 hover:bg-cyan-500 text-white text-xs px-3 py-1 rounded font-medium shadow-sm"
+                              >
+                                Сохранить
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <p className="text-xs text-slate-300 leading-relaxed font-sans select-text">
+                            {m.content}
+                          </p>
+                        )}
+
+                        {/* Tags list */}
+                        {!isEditing && m.tags && m.tags.length > 0 && (
+                          <div className="flex flex-wrap gap-1.5 pt-1">
+                            {m.tags.map((tag, idx) => (
+                              <span
+                                key={idx}
+                                onClick={() => {
+                                  setMemoryQuery(tag);
+                                  handleSearchMemory();
+                                }}
+                                className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-slate-800/80 hover:bg-slate-700/80 text-slate-400 hover:text-slate-200 cursor-pointer transition-colors"
+                              >
+                                #{tag}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })()}
           </div>
         )}
 

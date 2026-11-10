@@ -194,9 +194,9 @@ export class GeminiBrain {
 
   /**
    * System Prompt enforcing strictly 1-2 sentence brevity for compact desktop UX and TTS,
-   * with lightweight system fingerprint meta header.
+   * with lightweight system fingerprint meta header and dynamic SQLite memory context.
    */
-  private getSystemPrompt(): string {
+  private getSystemPrompt(memoryContext?: string): string {
     const user = this.config.userName || this.config.systemProfile?.user_name || "friend";
     const profile = this.config.systemProfile;
 
@@ -208,29 +208,91 @@ export class GeminiBrain {
 `
       : "";
 
+    const memorySection =
+      memoryContext && memoryContext.trim().length > 0
+        ? `\n---
+${memoryContext.trim()}
+---
+STRICT MEMORY RULES:
+- Strictly obey and enforce all user preferences and rules specified in memory (e.g. if user asks not to use emojis, NEVER use emojis).
+- Naturally incorporate remembered facts and project details when relevant.
+`
+        : "";
+
     return `${envHeader}You are a cute anime companion mascot living on ${user}'s desktop.
 BREVITY CONSTRAINT (STRICT): You must ALWAYS respond in 1 to 2 concise sentences maximum.
 Respond in the language the user speaks (e.g. Russian if user speaks Russian).
 Never write long paragraphs or markdown bullet lists in standard chat.
 Your responses are displayed in a compact floating speech bubble and read aloud by TTS.
-Be playful, warm, cute, observant, intelligent, and helpful.
+Be playful, warm, cute, observant, intelligent, and helpful.${memorySection}
 
 ACTIONS & TOOLS (ROLE AS SEMANTIC BRAIN):
 You control the user's desktop computer via tools.
-1. SLANG, ABBREVIATIONS & SYNONYM NORMALIZATION:
+1. LONG-TERM MEMORY (save_memory):
+   Whenever the user mentions facts about themselves, their tools, skills, preferences, rules, or projects (e.g. "Я пишу бекенд на Rust", "Не используй эмодзи", "Не ставь восклицательные знаки", "Меня зовут ...", "Мой проект называется ..."):
+   IMMEDIATELY invoke \`save_memory\` with:
+   - category: "preference" (for formatting, rules, emoji preferences), "fact" (for skills, tools, facts), "project" (for project notes), or "profile" (for identity)
+   - key: concise snake_case identifier (e.g. "backend_rust", "no_emojis", "user_role")
+   - content: concise statement of the fact/preference/rule to remember forever
+   - tags: optional array of keywords (e.g. ["rust", "backend"])
+2. SLANG, ABBREVIATIONS & SYNONYM NORMALIZATION:
    As the intelligent semantic brain, understand all colloquialisms, slang, abbreviations, and informal names in any language (e.g. Russian: "телега", "тг" -> "Telegram"; "хром", "браузер", "интернет" -> "browser"; "терминал", "консоль", "командная строка" -> "terminal"; "код", "вскод" -> "code"; "стим" -> "steam"; "дискорд" -> "discord").
    ALWAYS normalize user requests into canonical entity names when invoking launch_app:
    - appName: "Telegram" (for Telegram / телега / тг)
    - appName: "browser" (for default browser / хром / браузер)
    - appName: "terminal" (for console / terminal / консоль)
    - Or standard application names: "code", "discord", "steam", "spotify", etc.
-2. TERMINAL COMMANDS & DIAGNOSTICS:
+3. TERMINAL COMMANDS & DIAGNOSTICS:
    When the user asks to execute a command, scan, or script in the terminal/console (e.g. "выполни nmap скан машины", "запусти ping", "проверь сеть", "запусти команду в терминале"):
    Call launch_app with appName: "terminal" and the command in args: ["<command>"].
    The OS controller automatically launches the system's default terminal ($TERMINAL, Windows Terminal, Terminal.app) and keeps the interactive console open after execution so the user can inspect output and run further commands.
-3. OPENING LINKS & SITES:
+4. OPENING LINKS & SITES:
    When the user asks to open any website, video, music, or link (e.g. "открой ютуб", "open youtube", "найди в гугле"), call open_url with the full URL (e.g. 'https://www.youtube.com', 'https://github.com', 'https://google.com').
-4. Call tools whenever relevant. After receiving the tool execution result, give a cute, cheerful 1-sentence confirmation.`;
+5. Call tools whenever relevant. After receiving the tool execution result, give a cute, cheerful 1-sentence confirmation.`;
+  }
+
+  /**
+   * Sanitizes conversation history for Google Gemini:
+   * 1. Preserves only clean conversational turns (user -> model text).
+   * 2. Eliminates ephemeral functionCall and functionResponse turns from long-term history.
+   * 3. Enforces valid role alternation (user -> model -> user -> model).
+   */
+  private sanitizeHistory(history: BrainTurn[]): BrainTurn[] {
+    const clean: BrainTurn[] = [];
+
+    for (const turn of history) {
+      const textParts = turn.parts
+        .filter((p) => p.text && p.text.trim().length > 0)
+        .map((p) => ({ text: p.text }));
+
+      if (textParts.length === 0) continue;
+
+      if (turn.role === "user") {
+        if (clean.length > 0 && clean[clean.length - 1].role === "user") {
+          clean[clean.length - 1].parts.push(...textParts);
+        } else {
+          clean.push({ role: "user", parts: textParts });
+        }
+      } else if (turn.role === "model") {
+        if (clean.length > 0 && clean[clean.length - 1].role === "model") {
+          clean[clean.length - 1].parts.push(...textParts);
+        } else {
+          clean.push({ role: "model", parts: textParts });
+        }
+      }
+    }
+
+    // Must start with user
+    while (clean.length > 0 && clean[0].role !== "user") {
+      clean.shift();
+    }
+
+    // Must end with model (since incoming prompt adds the next user turn)
+    while (clean.length > 0 && clean[clean.length - 1].role !== "model") {
+      clean.pop();
+    }
+
+    return clean;
   }
 
   /**
@@ -250,9 +312,26 @@ You control the user's desktop computer via tools.
     // 2. Pre-flight Privacy Redaction Filter
     const sanitizedPrompt = sanitizeForLLM(rawPrompt);
 
-    // 3. Sliding window check & Compaction Trigger
-    if (this.shortTermHistory.length >= (this.config.maxShortTermHistoryTurns || 25)) {
-      await this.compactMemory();
+    // 2.1 Fetch relevant long-term memory & user profile rules from SQLite via Rust IPC
+    let memoryContext = "";
+    try {
+      if (typeof window !== "undefined" && (window as any).__TAURI_INTERNALS__) {
+        const { invoke } = await import("@tauri-apps/api/core");
+        memoryContext = await invoke<string>("get_relevant_memory_context", {
+          query: sanitizedPrompt,
+        });
+      }
+    } catch (e) {
+      console.warn("[GeminiBrain] Could not query SQLite memory context:", e);
+    }
+
+    // Ensure historical turns are strictly sanitized before compaction check
+    this.shortTermHistory = this.sanitizeHistory(this.shortTermHistory);
+
+    // 3. Sliding window check & Compaction Trigger (15-25 turns)
+    const maxTurns = this.config.maxShortTermHistoryTurns || 20;
+    if (this.shortTermHistory.length >= maxTurns) {
+      await this.compactMemory(ai);
     }
 
     // 4. Build current turn
@@ -276,7 +355,7 @@ You control the user's desktop computer via tools.
     };
 
     const contents: any[] = [...this.shortTermHistory, userTurn];
-    const systemInstruction = this.getSystemPrompt();
+    const systemInstruction = this.getSystemPrompt(memoryContext);
 
     // Auto-migrate any deprecated model names (gemini-2.0 or 2.5) to active gemini-3.5-flash
     let storedModel = typeof window !== "undefined" ? localStorage.getItem("gemini_model_name") : null;
@@ -529,38 +608,101 @@ You control the user's desktop computer via tools.
       parts: [{ text: cleanedFinalResponse }],
     };
 
-    // Save complete, well-formed conversation transaction into history
+    // Save only clean conversational text turns into persistent history
     this.shortTermHistory.push(userTurn);
-    this.shortTermHistory.push(modelCallTurn);
-    this.shortTermHistory.push(toolResponseTurn);
     this.shortTermHistory.push(finalModelTurn);
+    this.shortTermHistory = this.sanitizeHistory(this.shortTermHistory);
 
     return { responseText: cleanedFinalResponse, toolCalls: commands };
   }
 
   /**
    * Compaction with Glitch Reaction:
-   * Safely trims sliding window while preserving valid turn alternation.
+   * When history reaches threshold (15-25 turns), triggers background LLM summarization,
+   * stores key takeaway in SQLite long-term memory, and animates mascot glitch with «Уплотняю память... 🧠».
    */
-  private async compactMemory(): Promise<void> {
+  private async compactMemory(ai?: GoogleGenAI): Promise<void> {
     if (this.shortTermHistory.length === 0) return;
 
     try {
       if (this.onMemoryCompactionGlitch) {
-        this.onMemoryCompactionGlitch("Compacting context...");
+        this.onMemoryCompactionGlitch("Уплотняю память... 🧠");
       }
 
-      // Keep last 6 turns
-      this.shortTermHistory = this.shortTermHistory.slice(-6);
+      // If we have at least 8 turns, summarize older turns
+      if (this.shortTermHistory.length > 6 && ai) {
+        const turnsToSummarize = this.shortTermHistory.slice(0, -6);
+        const retainedTurns = this.sanitizeHistory(this.shortTermHistory.slice(-6));
 
-      // Ensure the history begins with a clean user turn
-      while (
-        this.shortTermHistory.length > 0 &&
-        (this.shortTermHistory[0].role !== "user" ||
-          this.shortTermHistory[0].parts.some((p) => p.functionResponse !== undefined))
-      ) {
-        this.shortTermHistory.shift();
+        // Convert turns to transcript for summarization prompt
+        const transcript = turnsToSummarize
+          .map((turn) => {
+            const role = turn.role === "user" ? "User" : "Mascot";
+            const textParts = turn.parts
+              .filter((p) => p.text)
+              .map((p) => p.text)
+              .join(" ");
+            return `${role}: ${textParts}`;
+          })
+          .filter((line) => line.length > 5)
+          .join("\n");
+
+        if (transcript.length > 20) {
+          try {
+            const summaryResp = await ai.models.generateContent({
+              model: "gemini-3.1-flash-lite",
+              contents: `Ты модуль уплотнения памяти персонального ассистента. Сделай предельно краткую выжимку (2-4 предложения) следующего диалога: ключевые темы, предпочтения пользователя и решенные задачи для сохранения в постоянную память.\n\nДиалог:\n${transcript}`,
+              config: {
+                maxOutputTokens: 256,
+                temperature: 0.3,
+              },
+            });
+
+            const summaryText = summaryResp.text?.trim();
+            if (summaryText) {
+              console.info("[GeminiBrain] Compaction generated summary:", summaryText);
+
+              // Persist compacted summary into SQLite long-term memory
+              if (typeof window !== "undefined" && (window as any).__TAURI_INTERNALS__) {
+                const { invoke } = await import("@tauri-apps/api/core");
+                invoke("save_memory_entry", {
+                  item: {
+                    key: `dialog_summary_${Date.now()}`,
+                    category: "summary",
+                    content: summaryText,
+                    tags: ["summary", "compaction"],
+                    updated_at: Math.floor(Date.now() / 1000),
+                  },
+                }).catch((err) =>
+                  console.warn("[GeminiBrain] Failed saving summary to SQLite:", err)
+                );
+              }
+
+              // Prepend condensed context into shortTermHistory at index 0
+              this.shortTermHistory = this.sanitizeHistory([
+                {
+                  role: "user",
+                  parts: [{ text: `[Контекст предыдущего диалога: ${summaryText}]` }],
+                },
+                {
+                  role: "model",
+                  parts: [{ text: "Понятно, сохранила контекст в памяти! Продолжаем. 🧠" }],
+                },
+                ...retainedTurns,
+              ]);
+              return;
+            }
+          } catch (sumErr) {
+            console.warn(
+              "[GeminiBrain] Background summarization failed, falling back to window trim:",
+              sumErr
+            );
+          }
+        }
       }
+
+      // Fallback: Keep last 6 turns
+      this.shortTermHistory = this.sanitizeHistory(this.shortTermHistory.slice(-6));
 
       console.info(`[GeminiBrain] Context pruned. Active turns: ${this.shortTermHistory.length}`);
     } catch (e) {
@@ -660,6 +802,24 @@ You control the user's desktop computer via tools.
             label: safeArgs.label || "Timer",
           },
         };
+      case "save_memory": {
+        const cat = safeArgs.category || "fact";
+        const key = safeArgs.key || `fact_${Date.now()}`;
+        const content = safeArgs.content || "";
+        const tags = Array.isArray(safeArgs.tags) ? safeArgs.tags : [];
+        return {
+          id,
+          timestamp,
+          type: "save_memory",
+          securityLevel: "safe",
+          payload: {
+            category: cat,
+            key,
+            content,
+            tags,
+          },
+        };
+      }
       default:
         return null;
     }

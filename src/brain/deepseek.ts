@@ -144,7 +144,7 @@ export class DeepSeekBrain {
     return base.replace(/\/+$/, "");
   }
 
-  private getSystemPrompt(): string {
+  private getSystemPrompt(memoryContext?: string): string {
     const user = this.config.userName || this.config.systemProfile?.user_name || "friend";
     const profile = this.config.systemProfile;
 
@@ -156,29 +156,97 @@ export class DeepSeekBrain {
 `
       : "";
 
+    const memorySection =
+      memoryContext && memoryContext.trim().length > 0
+        ? `\n---
+${memoryContext.trim()}
+---
+STRICT MEMORY RULES:
+- Strictly obey and enforce all user preferences and rules specified in memory (e.g. if user asks not to use emojis, NEVER use emojis).
+- Naturally incorporate remembered facts and project details when relevant.
+`
+        : "";
+
     return `${envHeader}You are a cute anime companion mascot living on ${user}'s desktop.
 BREVITY CONSTRAINT (STRICT): You must ALWAYS respond in 1 to 2 concise sentences maximum.
 Respond in the language the user speaks (e.g. Russian if user speaks Russian).
 Never write long paragraphs or markdown bullet lists in standard chat.
 Your responses are displayed in a compact floating speech bubble and read aloud by TTS.
-Be playful, warm, cute, observant, intelligent, and helpful.
+Be playful, warm, cute, observant, intelligent, and helpful.${memorySection}
 
 ACTIONS & TOOLS (ROLE AS SEMANTIC BRAIN):
 You control the user's desktop computer via tools.
-1. SLANG, ABBREVIATIONS & SYNONYM NORMALIZATION:
+1. LONG-TERM MEMORY (save_memory):
+   Whenever the user mentions facts about themselves, their tools, skills, preferences, rules, or projects (e.g. "Я пишу бекенд на Rust", "Не используй эмодзи", "Не ставь восклицательные знаки", "Меня зовут ...", "Мой проект называется ..."):
+   IMMEDIATELY invoke \`save_memory\` with:
+   - category: "preference" (for formatting, rules, emoji preferences), "fact" (for skills, tools, facts), "project" (for project notes), or "profile" (for identity)
+   - key: concise snake_case identifier (e.g. "backend_rust", "no_emojis", "user_role")
+   - content: concise statement of the fact/preference/rule to remember forever
+   - tags: optional array of keywords (e.g. ["rust", "backend"])
+2. SLANG, ABBREVIATIONS & SYNONYM NORMALIZATION:
    As the intelligent semantic brain, understand all colloquialisms, slang, abbreviations, and informal names in any language (e.g. Russian: "телега", "тг" -> "Telegram"; "хром", "браузер", "интернет" -> "browser"; "терминал", "консоль", "командная строка" -> "terminal"; "код", "вскод" -> "code"; "стим" -> "steam"; "дискорд" -> "discord").
    ALWAYS normalize user requests into canonical entity names when invoking launch_app:
    - appName: "Telegram" (for Telegram / телега / тг)
    - appName: "browser" (for default browser / хром / браузер)
    - appName: "terminal" (for console / terminal / консоль)
    - Or standard application names: "code", "discord", "steam", "spotify", etc.
-2. TERMINAL COMMANDS & DIAGNOSTICS:
+3. TERMINAL COMMANDS & DIAGNOSTICS:
    When the user asks to execute a command, scan, or script in the terminal/console (e.g. "выполни nmap скан машины", "запусти ping", "проверь сеть", "запусти команду в терминале"):
    Call launch_app with appName: "terminal" and the command in args: ["<command>"].
    The OS controller automatically launches the system's default terminal ($TERMINAL, Windows Terminal, Terminal.app) and keeps the interactive console open after execution so the user can inspect output and run further commands.
-3. OPENING LINKS & SITES:
+4. OPENING LINKS & SITES:
    When the user asks to open any website, video, music, or link (e.g. "открой ютуб", "open youtube", "найди в гугле"), call open_url with the full URL (e.g. 'https://www.youtube.com', 'https://github.com', 'https://google.com').
-4. Call tools whenever relevant. After receiving the tool execution result, give a cute, cheerful 1-sentence confirmation.`;
+5. Call tools whenever relevant. After receiving the tool execution result, give a cute, cheerful 1-sentence confirmation.`;
+  }
+
+  /**
+   * Sanitizes conversation history for OpenAI/DeepSeek chat completions API:
+   * 1. Preserves only clean conversational turns (user -> assistant text).
+   * 2. Eliminates ephemeral tool_calls and tool response messages from long-term history.
+   * 3. Enforces valid role alternation (user -> assistant -> user -> assistant).
+   * 4. Guarantees no orphaned messages or tool role violations can reach the API.
+   */
+  private sanitizeHistory(messages: DeepSeekMessage[]): DeepSeekMessage[] {
+    const clean: DeepSeekMessage[] = [];
+
+    for (const m of messages) {
+      if (m.role === "system") continue;
+      // Strip old tool responses from persistent history
+      if (m.role === "tool") continue;
+
+      if (m.role === "user") {
+        const text = (m.content || "").trim();
+        if (text) {
+          if (clean.length > 0 && clean[clean.length - 1].role === "user") {
+            clean[clean.length - 1].content += `\n${text}`;
+          } else {
+            clean.push({ role: "user", content: text });
+          }
+        }
+      } else if (m.role === "assistant") {
+        const text = (m.content || "").trim();
+        if (text) {
+          if (clean.length > 0 && clean[clean.length - 1].role === "assistant") {
+            clean[clean.length - 1].content += `\n${text}`;
+          } else {
+            // Strip tool_calls property so OpenAI/DeepSeek API doesn't require tool responses
+            clean.push({ role: "assistant", content: text });
+          }
+        }
+      }
+    }
+
+    // Must start with user
+    while (clean.length > 0 && clean[0].role !== "user") {
+      clean.shift();
+    }
+
+    // Must end with assistant (since incoming prompt adds the next user message)
+    while (clean.length > 0 && clean[clean.length - 1].role !== "assistant") {
+      clean.pop();
+    }
+
+    return clean;
   }
 
   public async sendPrompt(
@@ -195,15 +263,111 @@ You control the user's desktop computer via tools.
 
     const sanitizedPrompt = sanitizeForLLM(rawPrompt);
 
-    // Prune history if needed
-    if (this.shortTermHistory.length >= (this.config.maxShortTermHistoryTurns || 20)) {
-      if (this.onMemoryCompactionGlitch) {
-        this.onMemoryCompactionGlitch("Compacting context...");
+    // 1. Fetch relevant persistent memory & user preferences from SQLite via Rust IPC
+    let memoryContext = "";
+    try {
+      if (typeof window !== "undefined" && (window as any).__TAURI_INTERNALS__) {
+        const { invoke } = await import("@tauri-apps/api/core");
+        memoryContext = await invoke<string>("get_relevant_memory_context", {
+          query: sanitizedPrompt,
+        });
       }
-      this.shortTermHistory = this.shortTermHistory.slice(-8);
+    } catch (e) {
+      console.warn("[DeepSeekBrain] Could not query SQLite memory context:", e);
     }
 
-    const systemInstruction = this.getSystemPrompt();
+    // Ensure historical messages are strictly valid before checking compaction
+    this.shortTermHistory = this.sanitizeHistory(this.shortTermHistory);
+
+    // 2. Sliding window check & Compaction Trigger (15-25 turns)
+    const maxTurns = this.config.maxShortTermHistoryTurns || 20;
+    if (this.shortTermHistory.length >= maxTurns) {
+      if (this.onMemoryCompactionGlitch) {
+        this.onMemoryCompactionGlitch("Уплотняю память... 🧠");
+      }
+
+      // If we have accumulated turns, perform background summarization
+      if (this.shortTermHistory.length > 6) {
+        const turnsToSummarize = this.shortTermHistory.slice(0, -6);
+        const retainedTurns = this.sanitizeHistory(this.shortTermHistory.slice(-6));
+
+        const transcript = turnsToSummarize
+          .map((m) => `${m.role === "user" ? "User" : "Mascot"}: ${m.content || ""}`)
+          .filter((line) => line.length > 5)
+          .join("\n");
+
+        if (transcript.length > 20) {
+          try {
+            const sumResp = await fetch(`${baseUrl}/chat/completions`, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${apiKey}`,
+              },
+              body: JSON.stringify({
+                model: "deepseek-chat",
+                messages: [
+                  {
+                    role: "user",
+                    content: `Ты модуль уплотнения памяти персонального ассистента. Сделай предельно краткую выжимку (2-4 предложения) следующего диалога: ключевые темы, предпочтения пользователя и решенные задачи для сохранения в постоянную память.\n\nДиалог:\n${transcript}`,
+                  },
+                ],
+                max_tokens: 256,
+                temperature: 0.3,
+              }),
+            });
+
+            if (sumResp.ok) {
+              const sumJson = await sumResp.json();
+              const summaryText = sumJson.choices?.[0]?.message?.content?.trim();
+              if (summaryText) {
+                console.info("[DeepSeekBrain] Compaction generated summary:", summaryText);
+
+                if (typeof window !== "undefined" && (window as any).__TAURI_INTERNALS__) {
+                  const { invoke } = await import("@tauri-apps/api/core");
+                  invoke("save_memory_entry", {
+                    item: {
+                      key: `dialog_summary_${Date.now()}`,
+                      category: "summary",
+                      content: summaryText,
+                      tags: ["summary", "compaction"],
+                      updated_at: Math.floor(Date.now() / 1000),
+                    },
+                  }).catch((err) =>
+                    console.warn("[DeepSeekBrain] Failed saving summary to SQLite:", err)
+                  );
+                }
+
+                this.shortTermHistory = this.sanitizeHistory([
+                  {
+                    role: "user",
+                    content: `[Контекст предыдущего диалога: ${summaryText}]`,
+                  },
+                  {
+                    role: "assistant",
+                    content: "Понятно, сохранила контекст в памяти! Продолжаем. 🧠",
+                  },
+                  ...retainedTurns,
+                ]);
+              } else {
+                this.shortTermHistory = retainedTurns;
+              }
+            } else {
+              this.shortTermHistory = retainedTurns;
+            }
+          } catch (e) {
+            console.warn("[DeepSeekBrain] Background summarization failed:", e);
+            this.shortTermHistory = retainedTurns;
+          }
+        } else {
+          this.shortTermHistory = retainedTurns;
+        }
+      } else {
+        this.shortTermHistory = this.sanitizeHistory(this.shortTermHistory.slice(-6));
+      }
+    }
+
+    const systemInstruction = this.getSystemPrompt(memoryContext);
     const userMessage: DeepSeekMessage = { role: "user", content: sanitizedPrompt };
 
     const messagesToSend: DeepSeekMessage[] = [
@@ -455,11 +619,10 @@ You control the user's desktop computer via tools.
         ? "Открыла ссылку! ✨"
         : "Готово! 🚀");
 
-    // Commit to conversation history
+    // Commit only clean conversational messages to persistent history
     this.shortTermHistory.push(userMessage);
-    this.shortTermHistory.push(assistantToolCallMessage);
-    this.shortTermHistory.push(...toolResponseMessages);
     this.shortTermHistory.push({ role: "assistant", content: finalResponse });
+    this.shortTermHistory = this.sanitizeHistory(this.shortTermHistory);
 
     return { responseText: finalResponse, toolCalls: commands };
   }
@@ -612,6 +775,24 @@ You control the user's desktop computer via tools.
             label: safeArgs.label || "Timer",
           },
         };
+      case "save_memory": {
+        const cat = safeArgs.category || "fact";
+        const key = safeArgs.key || `fact_${Date.now()}`;
+        const content = safeArgs.content || "";
+        const tags = Array.isArray(safeArgs.tags) ? safeArgs.tags : [];
+        return {
+          id,
+          timestamp,
+          type: "save_memory",
+          securityLevel: "safe",
+          payload: {
+            category: cat,
+            key,
+            content,
+            tags,
+          },
+        };
+      }
       default:
         return null;
     }

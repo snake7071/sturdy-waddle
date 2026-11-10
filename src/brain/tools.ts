@@ -112,6 +112,37 @@ export const GEMINI_TOOLS = [
       required: ["command", "explanation"],
     },
   },
+  {
+    name: "save_memory",
+    description:
+      "Saves an important fact, user preference, formatting rule, or project note into permanent long-term memory (SQLite). Call this immediately whenever the user mentions details about themselves, their tech stack, coding preferences (e.g. 'Я пишу бекенд на Rust', 'Не используй эмодзи'), current projects, or instructions to remember.",
+    parameters: {
+      type: "OBJECT",
+      properties: {
+        category: {
+          type: "STRING",
+          enum: ["preference", "fact", "project", "profile"],
+          description:
+            "Category: 'preference' for behavior rules/formatting/emojis, 'fact' for personal info/facts/tech stack, 'project' for project notes, 'profile' for user identity.",
+        },
+        key: {
+          type: "STRING",
+          description:
+            "Concise snake_case unique key (e.g. 'backend_rust', 'no_emojis', 'user_role', 'project_companion')",
+        },
+        content: {
+          type: "STRING",
+          description: "The exact fact, rule, or preference to remember forever.",
+        },
+        tags: {
+          type: "ARRAY",
+          items: { type: "STRING" },
+          description: "Optional list of search tags (e.g. ['rust', 'backend'])",
+        },
+      },
+      required: ["category", "key", "content"],
+    },
+  },
 ] as const;
 
 /**
@@ -242,6 +273,40 @@ export const OPENAI_TOOLS = [
           },
         },
         required: ["command", "explanation"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "save_memory",
+      description:
+        "Saves an important fact, user preference, formatting rule, or project note into permanent long-term memory (SQLite). Call this immediately whenever the user mentions details about themselves, their tech stack, coding preferences (e.g. 'Я пишу бекенд на Rust', 'Не используй эмодзи'), current projects, or instructions to remember.",
+      parameters: {
+        type: "object",
+        properties: {
+          category: {
+            type: "string",
+            enum: ["preference", "fact", "project", "profile"],
+            description:
+              "Category: 'preference' for behavior rules/formatting/emojis, 'fact' for personal info/facts/tech stack, 'project' for project notes, 'profile' for user identity.",
+          },
+          key: {
+            type: "string",
+            description:
+              "Concise snake_case unique key (e.g. 'backend_rust', 'no_emojis', 'user_role')",
+          },
+          content: {
+            type: "string",
+            description: "The exact fact, rule, or preference to remember forever.",
+          },
+          tags: {
+            type: "array",
+            items: { type: "string" },
+            description: "Optional list of search tags",
+          },
+        },
+        required: ["category", "key", "content"],
       },
     },
   },

@@ -191,7 +191,7 @@ export class AvatarStateMachine {
       this.context.glitchRemark = undefined;
       this.context.speechBubbleText = undefined;
       this.transition(this.getRestingState());
-    }, 1200);
+    }, 2000);
   }
 
   /**

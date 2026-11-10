@@ -100,6 +100,17 @@ export interface MemoryCompactionCommand extends BaseCommand {
   };
 }
 
+export interface SaveMemoryCommand extends BaseCommand {
+  type: "save_memory";
+  securityLevel: "safe";
+  payload: {
+    category: "preference" | "fact" | "project" | "profile" | string;
+    key: string;
+    content: string;
+    tags?: string[];
+  };
+}
+
 export type CompanionCommand =
   | OpenUrlCommand
   | LaunchAppCommand
@@ -109,6 +120,7 @@ export type CompanionCommand =
   | WindowPerchCommand
   | CaptureScreenCommand
   | SetTimerCommand
+  | SaveMemoryCommand
   | MemoryCompactionCommand;
 
 // ============================================================================

@@ -146,6 +146,29 @@ pub async fn search_memory(
 }
 
 #[tauri::command]
+pub async fn get_all_memories(
+    state: State<'_, AppState>,
+) -> Result<Vec<MemoryItem>, String> {
+    state.memory_store.get_all()
+}
+
+#[tauri::command]
+pub async fn delete_memory(
+    id: i64,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    state.memory_store.delete(id)
+}
+
+#[tauri::command]
+pub async fn get_relevant_memory_context(
+    query: String,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    state.memory_store.get_relevant_context(&query)
+}
+
+#[tauri::command]
 pub async fn set_window_clickthrough(
     window: Window,
     ignore_cursor: bool,

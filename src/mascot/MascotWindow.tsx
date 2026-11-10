@@ -191,6 +191,8 @@ export const MascotWindow: React.FC = () => {
         ? `Запускаю ${command.payload.appName || "программу"}... 🚀`
         : command.type === "open_url"
         ? "Открываю ссылку... 🌐"
+        : command.type === "save_memory"
+        ? "Запоминаю факт... 🧠"
         : command.type === "execute_shell"
         ? "Выполняю команду... ⚙️"
         : "Выполняю задачу... ⚙️";
@@ -239,6 +241,19 @@ export const MascotWindow: React.FC = () => {
           fsm.triggerSpeech(`⏰ Напоминание: ${command.payload.label}`, 6000);
         }, command.payload.durationSeconds * 1000);
         return { success: true, output: `Timer set for ${command.payload.durationSeconds}s` };
+      } else if (command.type === "save_memory") {
+        const item = {
+          key: command.payload.key,
+          category: command.payload.category,
+          content: command.payload.content,
+          tags: command.payload.tags || [],
+          updated_at: Math.floor(Date.now() / 1000),
+        };
+        await invoke("save_memory_entry", { item });
+        return {
+          success: true,
+          output: `Memory successfully recorded in SQLite: [${command.payload.category}] ${command.payload.key}: ${command.payload.content}`,
+        };
       } else if (command.type === "execute_shell") {
         const res: any = await invoke("execute_sandboxed_shell", {
           command: command.payload.command,
