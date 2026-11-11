@@ -65,7 +65,9 @@ jobs:
             libxrandr-dev \
             libdbus-1-dev \
             libwayland-dev \
-            libegl-dev
+            libegl-dev \
+            libgbm-dev \
+            libdrm-dev
 
       - name: Install Node dependencies
         run: npm ci || npm install
