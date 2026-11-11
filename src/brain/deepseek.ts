@@ -67,7 +67,7 @@ export function formatDeepSeekError(err: any): string {
     lower.includes("authentication") ||
     lower.includes("unauthorized")
   ) {
-    return "Неверный API ключ DeepSeek. Проверьте ключ в настройках (⚙️).";
+    return "Неверный API ключ DeepSeek. Проверьте ключ в настройках.";
   }
   if (
     lower.includes("402") ||
@@ -127,7 +127,7 @@ export class DeepSeekBrain implements BrainProvider {
     const apiKey = (localKey && localKey.trim()) || (envKey && envKey.trim()) || "";
 
     if (!apiKey) {
-      throw new Error("DeepSeek API key is missing. Click the settings gear (⚙️) to add it.");
+      throw new Error("DeepSeek API key is missing. Open settings to add it.");
     }
 
     return apiKey;
@@ -191,6 +191,7 @@ STRICT MEMORY RULES:
     return `${envHeader}${characterSection}BREVITY CONSTRAINT (STRICT): You must ALWAYS respond in 1 to 2 concise sentences maximum.
 Respond in the language the user speaks (e.g. Russian if user speaks Russian).
 Never write long paragraphs or markdown bullet lists in standard chat.
+NO EMOJIS CONSTRAINT (STRICT): NEVER use emojis, emoticons, or icons in your responses under any circumstances. Always write clean, plain text without any emojis.
 Your responses are displayed in a compact floating speech bubble and read aloud by TTS.${memorySection}
 
 ACTIONS & TOOLS (ROLE AS SEMANTIC BRAIN):
@@ -320,7 +321,7 @@ You control the user's desktop computer via tools.
     const maxTurns = this.config.maxShortTermHistoryTurns || 20;
     if (this.shortTermHistory.length >= maxTurns) {
       if (this.onMemoryCompactionGlitch) {
-        this.onMemoryCompactionGlitch("Уплотняю память... 🧠");
+        this.onMemoryCompactionGlitch("Уплотняю память...");
       }
 
       // If we have accumulated turns, perform background summarization
@@ -382,7 +383,7 @@ You control the user's desktop computer via tools.
                   },
                   {
                     role: "assistant",
-                    content: "Понятно, сохранила контекст в памяти! Продолжаем. 🧠",
+                    content: "Понятно, сохранила контекст в памяти! Продолжаем.",
                   },
                   ...retainedTurns,
                 ]);
@@ -687,8 +688,8 @@ You control the user's desktop computer via tools.
     const finalResponse =
       finalResponseText.trim() ||
       (allExecutedCommands.some((c) => c.type === "open_url")
-        ? "Открыла ссылку! ✨"
-        : "Готово! 🚀");
+        ? "Ссылка открыта."
+        : "Готово.");
 
     // Commit only clean conversational messages to persistent history
     this.shortTermHistory.push(userMessage);

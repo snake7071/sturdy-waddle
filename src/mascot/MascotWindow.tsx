@@ -169,7 +169,7 @@ export const MascotWindow: React.FC = () => {
     setIsVisionMode(false);
 
     // Record user message into chat history
-    appendToHistory("user", useVision ? `[📸 Снимок экрана] ${prompt}` : prompt);
+    appendToHistory("user", useVision ? `[Снимок экрана] ${prompt}` : prompt);
 
     // Immediate local intent check for hiding the companion
     if (
@@ -177,7 +177,7 @@ export const MascotWindow: React.FC = () => {
         prompt
       )
     ) {
-      const ack = "Хорошо, скрываюсь! Нажмите на иконку в трее, чтобы вернуть меня. 🐾";
+      const ack = "Хорошо, скрываюсь! Нажмите на иконку в трее, чтобы вернуть меня.";
       appendToHistory("companion", ack);
       fsm.triggerSpeech(ack, 3000);
       setTimeout(async () => {
@@ -193,7 +193,7 @@ export const MascotWindow: React.FC = () => {
 
     let screenBase64: string | undefined = undefined;
     if (useVision) {
-      fsm.transition("working", { speechBubbleText: "Делаю снимок экрана... 📸" });
+      fsm.transition("working", { speechBubbleText: "Делаю снимок экрана..." });
       try {
         const rawB64 = await invoke<string>("capture_screen_snapshot");
         screenBase64 = rawB64.startsWith("data:") ? rawB64 : `data:image/jpeg;base64,${rawB64}`;
@@ -203,7 +203,7 @@ export const MascotWindow: React.FC = () => {
       }
     }
 
-    fsm.transition("working", { speechBubbleText: "Размышляю... 💭" });
+    fsm.transition("working", { speechBubbleText: "Размышляю..." });
 
     try {
       if (!brainRef.current) throw new Error("Brain not initialized");
@@ -225,7 +225,7 @@ export const MascotWindow: React.FC = () => {
         (_thoughtText) => {
           // Model is actively reasoning in Thinking Mode
           if (!hasSwitchedToTalking) {
-            fsm.transition("working", { speechBubbleText: "Хмм, дай подумать... 🤔" });
+            fsm.transition("working", { speechBubbleText: "Размышляю..." });
           }
         }
       );
@@ -235,8 +235,8 @@ export const MascotWindow: React.FC = () => {
         appendToHistory("companion", result.responseText);
         fsm.triggerSpeech(result.responseText, 4500);
       } else {
-        appendToHistory("companion", "Готово! ✨");
-        fsm.triggerSpeech("Готово! ✨", 3000);
+        appendToHistory("companion", "Готово.");
+        fsm.triggerSpeech("Готово.", 3000);
       }
     } catch (err: any) {
       let warning = err?.message || "Google AI servers are overloaded. Please try again in a few seconds.";
@@ -257,7 +257,7 @@ export const MascotWindow: React.FC = () => {
       if (!warning) warning = "Google AI servers are overloaded. Please try again in a few seconds.";
 
       console.warn("[MascotWindow] Handled prompt error:", warning);
-      appendToHistory("companion", `⚠️ ${warning}`);
+      appendToHistory("companion", warning);
       fsm.triggerError(warning, 4000);
     } finally {
       if (fsm.getState() === "working") {
@@ -279,14 +279,14 @@ export const MascotWindow: React.FC = () => {
 
     const taskDescription =
       command.type === "launch_app"
-        ? `Запускаю ${command.payload.appName || "программу"}... 🚀`
+        ? `Запускаю ${command.payload.appName || "программу"}...`
         : command.type === "open_url"
-        ? "Открываю ссылку... 🌐"
+        ? "Открываю ссылку..."
         : command.type === "save_memory"
-        ? "Запоминаю факт... 🧠"
+        ? "Запоминаю факт..."
         : command.type === "execute_shell"
-        ? "Выполняю команду... ⚙️"
-        : "Выполняю задачу... ⚙️";
+        ? "Выполняю команду..."
+        : "Выполняю задачу...";
     fsm.transition("working", { speechBubbleText: taskDescription });
 
     return await executeCommand(command);
@@ -334,7 +334,7 @@ export const MascotWindow: React.FC = () => {
         }
       } else if (command.type === "set_timer") {
         setTimeout(() => {
-          fsm.triggerSpeech(`⏰ Напоминание: ${command.payload.label}`, 6000);
+          fsm.triggerSpeech(`Напоминание: ${command.payload.label}`, 6000);
         }, command.payload.durationSeconds * 1000);
         return { success: true, output: `Timer set for ${command.payload.durationSeconds}s` };
       } else if (command.type === "save_memory") {
@@ -374,7 +374,7 @@ export const MascotWindow: React.FC = () => {
           output: formattedOutput,
         };
       } else if (command.type === "hide_companion") {
-        const farewell = "Хорошо, скрываюсь! Нажмите на иконку в трее или горячую клавишу, чтобы вернуть меня. 🐾";
+        const farewell = "Хорошо, скрываюсь! Нажмите на иконку в трее или горячую клавишу, чтобы вернуть меня.";
         appendToHistory("companion", farewell);
         fsm.triggerSpeech(farewell, 3000);
         setTimeout(async () => {
@@ -424,7 +424,7 @@ export const MascotWindow: React.FC = () => {
                 async (cmd) => await handleCommandDispatch(cmd),
                 () => {
                   if (!switched) {
-                    fsm.transition("working", { speechBubbleText: "Анализирую изображение... 🤔" });
+                    fsm.transition("working", { speechBubbleText: "Анализирую изображение..." });
                   }
                 }
               );
@@ -521,7 +521,7 @@ export const MascotWindow: React.FC = () => {
                   if (pendingApproval) {
                     const { command, resolve } = pendingApproval;
                     setPendingApproval(null);
-                    fsm.transition("working", { speechBubbleText: "Выполняю... ⚙️" });
+                    fsm.transition("working", { speechBubbleText: "Выполняю..." });
                     const res = await executeCommand(command);
                     resolve(res);
                   }
@@ -563,7 +563,7 @@ export const MascotWindow: React.FC = () => {
           }`}
           title="Чат с компаньоном"
         >
-          💬 Чат
+          Чат
         </button>
         <span className="text-slate-600">|</span>
         <button
@@ -576,7 +576,7 @@ export const MascotWindow: React.FC = () => {
           }`}
           title="Показать / скрыть историю диалога"
         >
-          📜 История
+          История
         </button>
         <span className="text-slate-600">|</span>
         <button
@@ -587,7 +587,7 @@ export const MascotWindow: React.FC = () => {
           className="hover:text-cyan-400 font-mono transition-colors"
           title="Присесть на активное окно"
         >
-          🪟
+          Окно
         </button>
         <span className="text-slate-600">|</span>
         <button
@@ -601,7 +601,7 @@ export const MascotWindow: React.FC = () => {
           className="hover:text-cyan-400 font-mono transition-colors"
           title="Панель управления и настройки"
         >
-          ⚙️
+          Настройки
         </button>
         <span className="text-slate-600">|</span>
         <button
@@ -616,7 +616,7 @@ export const MascotWindow: React.FC = () => {
           className="hover:text-amber-400 font-mono transition-colors"
           title="Скрыть компаньона в трей"
         >
-          🙈
+          Скрыть
         </button>
       </div>
 
@@ -626,7 +626,6 @@ export const MascotWindow: React.FC = () => {
           {/* Header */}
           <div className="flex items-center justify-between border-b border-slate-800 pb-1.5 mb-2">
             <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-200">
-              <span>💬</span>
               <span>История чата</span>
               <span className="text-[10px] text-slate-500 font-mono">({chatHistory.length})</span>
             </div>
@@ -659,10 +658,9 @@ export const MascotWindow: React.FC = () => {
           <div className="flex-1 overflow-y-auto space-y-2 pr-1 text-xs">
             {chatHistory.length === 0 ? (
               <div className="h-full flex flex-col items-center justify-center text-center text-slate-500 py-6 text-[11px]">
-                <span className="text-2xl mb-1.5">🐾</span>
                 <span className="font-medium text-slate-400">История сообщений пуста</span>
                 <span className="text-[10px] text-slate-600 mt-0.5">
-                  Нажмите кнопку «💬 Чат», чтобы поговорить с компаньоном!
+                  Нажмите кнопку «Чат», чтобы поговорить с компаньоном!
                 </span>
               </div>
             ) : (
@@ -712,7 +710,10 @@ export const MascotWindow: React.FC = () => {
             }
             aria-label="Toggle Vision Mode"
           >
-            👁️
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+            </svg>
           </button>
           <input
             type="text"
@@ -721,7 +722,7 @@ export const MascotWindow: React.FC = () => {
             onKeyDown={(e) => e.key === "Enter" && handleSendPrompt()}
             placeholder={
               isVisionMode
-                ? "Спросить по текущему экрану... 👁️"
+                ? "Спросить по текущему экрану..."
                 : "Talk to companion..."
             }
             className="flex-1 bg-slate-800 text-xs text-white px-2 py-1 rounded outline-none border border-slate-700 focus:border-cyan-400 font-mono"
@@ -741,7 +742,6 @@ export const MascotWindow: React.FC = () => {
         <div className="absolute inset-2 bg-slate-950/95 border border-red-500/80 rounded-xl p-3 flex flex-col justify-between z-50 shadow-2xl text-xs">
           <div>
             <div className="flex items-center gap-1.5 text-red-400 font-bold mb-1">
-              <span>⚠️</span>
               <span>Approval Required</span>
             </div>
             <p className="text-slate-300 text-[11px] mb-2">
@@ -769,7 +769,7 @@ export const MascotWindow: React.FC = () => {
               onClick={async () => {
                 const item = pendingApproval;
                 setPendingApproval(null);
-                fsm.transition("working", { speechBubbleText: "Выполняю... ⚙️" });
+                fsm.transition("working", { speechBubbleText: "Выполняю..." });
                 const res = await executeCommand(item.command);
                 item.resolve(res);
                 fsm.transition("idle");

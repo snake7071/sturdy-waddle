@@ -243,6 +243,7 @@ STRICT MEMORY RULES:
     return `${envHeader}${characterSection}BREVITY CONSTRAINT (STRICT): You must ALWAYS respond in 1 to 2 concise sentences maximum.
 Respond in the language the user speaks (e.g. Russian if user speaks Russian).
 Never write long paragraphs or markdown bullet lists in standard chat.
+NO EMOJIS CONSTRAINT (STRICT): NEVER use emojis, emoticons, or icons in your responses under any circumstances. Always write clean, plain text without any emojis.
 Your responses are displayed in a compact floating speech bubble and read aloud by TTS.${memorySection}
 
 VISION & SCREEN AWARENESS:
@@ -665,8 +666,8 @@ You control the user's desktop computer via tools.
     const cleanedFinalResponse =
       finalAccumulatedText.trim() ||
       (allExecutedCommands.some((c) => c.type === "open_url")
-        ? "Открыла ссылку! ✨"
-        : "Готово! 🚀");
+        ? "Ссылка открыта."
+        : "Готово.");
 
     const finalModelTurn: BrainTurn = {
       role: "model",
@@ -684,14 +685,14 @@ You control the user's desktop computer via tools.
   /**
    * Compaction with Glitch Reaction:
    * When history reaches threshold (15-25 turns), triggers background LLM summarization,
-   * stores key takeaway in SQLite long-term memory, and animates mascot glitch with «Уплотняю память... 🧠».
+   * stores key takeaway in SQLite long-term memory, and animates mascot glitch with «Уплотняю память...».
    */
   private async compactMemory(ai?: GoogleGenAI): Promise<void> {
     if (this.shortTermHistory.length === 0) return;
 
     try {
       if (this.onMemoryCompactionGlitch) {
-        this.onMemoryCompactionGlitch("Уплотняю память... 🧠");
+        this.onMemoryCompactionGlitch("Уплотняю память...");
       }
 
       // If we have at least 8 turns, summarize older turns
@@ -751,7 +752,7 @@ You control the user's desktop computer via tools.
                 },
                 {
                   role: "model",
-                  parts: [{ text: "Понятно, сохранила контекст в памяти! Продолжаем. 🧠" }],
+                  parts: [{ text: "Понятно, сохранила контекст в памяти! Продолжаем." }],
                 },
                 ...retainedTurns,
               ]);

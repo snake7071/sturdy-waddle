@@ -345,7 +345,7 @@ export const DashboardWindow: React.FC = () => {
       window.dispatchEvent(new CustomEvent("ai-settings-changed", { detail: { provider } }));
     }
 
-    setSavedStatus("Настройки сохранены и применены! 🎉");
+    setSavedStatus("Настройки сохранены и применены.");
     setTimeout(() => setSavedStatus(""), 3500);
   };
 
@@ -393,7 +393,7 @@ export const DashboardWindow: React.FC = () => {
       };
 
       await invoke("save_memory_entry", { item });
-      setMemoryStatus(`Знание "${item.key}" успешно сохранено в SQLite! 🧠✨`);
+      setMemoryStatus(`Знание "${item.key}" успешно сохранено в SQLite.`);
       setNewMemoryKey("");
       setNewMemoryContent("");
       setNewMemoryTags("");
@@ -665,7 +665,7 @@ export const DashboardWindow: React.FC = () => {
       setInstalledAvatars([...refreshed]);
       setActiveAvatarId(manifest.id);
 
-      setAvatarStatus(`Маскот "${manifest.name}" успешно установлен и активирован! 🎉`);
+      setAvatarStatus(`Маскот "${manifest.name}" успешно установлен и активирован.`);
       setTimeout(() => setAvatarStatus(""), 5000);
 
       // Reset upload form
@@ -686,7 +686,6 @@ export const DashboardWindow: React.FC = () => {
       <div className="w-56 bg-slate-900 border-r border-slate-800 p-4 flex flex-col justify-between">
         <div>
           <div className="flex items-center gap-2 mb-6 px-2">
-            <span className="text-xl">🤖</span>
             <div>
               <h1 className="text-sm font-bold text-cyan-400">Companion Core</h1>
               <p className="text-[10px] text-slate-400">GNU GPL-3.0 Architecture</p>
@@ -702,7 +701,7 @@ export const DashboardWindow: React.FC = () => {
                   : "text-slate-400 hover:bg-slate-800 hover:text-slate-200"
               }`}
             >
-              ⚙️ Settings & API Keys
+              Settings & API Keys
             </button>
             <button
               onClick={() => setActiveTab("avatars")}
@@ -712,7 +711,7 @@ export const DashboardWindow: React.FC = () => {
                   : "text-slate-400 hover:bg-slate-800 hover:text-slate-200"
               }`}
             >
-              🎭 Avatars & Skins
+              Avatars & Skins
             </button>
             <button
               onClick={() => {
@@ -725,7 +724,7 @@ export const DashboardWindow: React.FC = () => {
                   : "text-slate-400 hover:bg-slate-800 hover:text-slate-200"
               }`}
             >
-              🧠 Memory
+              Memory
             </button>
             <button
               onClick={() => setActiveTab("husk")}
@@ -735,7 +734,7 @@ export const DashboardWindow: React.FC = () => {
                   : "text-slate-400 hover:bg-slate-800 hover:text-slate-200"
               }`}
             >
-              ⚡ Husk Mode Terminal IPC
+              Husk Mode Terminal IPC
             </button>
           </nav>
         </div>
@@ -777,7 +776,7 @@ export const DashboardWindow: React.FC = () => {
                     }`}
                   >
                     <div className="flex items-center justify-between mb-1">
-                      <span className="text-base">✨</span>
+                      <span className="text-xs font-mono font-bold text-cyan-400">GEMINI</span>
                       {provider === "gemini" && (
                         <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 border border-cyan-500/40">
                           Активен
@@ -803,7 +802,7 @@ export const DashboardWindow: React.FC = () => {
                     }`}
                   >
                     <div className="flex items-center justify-between mb-1">
-                      <span className="text-base">🐋</span>
+                      <span className="text-xs font-mono font-bold text-blue-400">DEEPSEEK</span>
                       {provider === "deepseek" && (
                         <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-300 border border-blue-500/40">
                           Активен
@@ -845,10 +844,10 @@ export const DashboardWindow: React.FC = () => {
                       <button
                         type="button"
                         onClick={() => setShowGeminiKey(!showGeminiKey)}
-                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200 text-xs p-1"
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200 text-[10px] px-1 py-0.5 rounded border border-slate-700"
                         title={showGeminiKey ? "Скрыть ключ" : "Показать ключ"}
                       >
-                        {showGeminiKey ? "🙈" : "👁️"}
+                        {showGeminiKey ? "Скрыть" : "Показать"}
                       </button>
                     </div>
                     <p className="text-[10px] text-slate-500 mt-1">
@@ -888,9 +887,8 @@ export const DashboardWindow: React.FC = () => {
                             : "bg-slate-950/40 border-slate-700/60 text-slate-400 hover:border-slate-600"
                         }`}
                       >
-                        <div className="font-bold text-[11px] flex items-center gap-1">
-                          <span>⚡</span>
-                          <span>Выключен</span>
+                        <div className="font-bold text-[11px]">
+                          Выключен
                         </div>
                         <div className="text-[10px] text-slate-500 mt-0.5">0 токенов (мгновенно)</div>
                       </button>
@@ -904,9 +902,8 @@ export const DashboardWindow: React.FC = () => {
                             : "bg-slate-950/40 border-slate-700/60 text-slate-400 hover:border-slate-600"
                         }`}
                       >
-                        <div className="font-bold text-[11px] flex items-center gap-1">
-                          <span>🧠</span>
-                          <span>Умный</span>
+                        <div className="font-bold text-[11px]">
+                          Умный
                         </div>
                         <div className="text-[10px] text-slate-500 mt-0.5">~1024 токена CoT</div>
                       </button>
@@ -920,9 +917,8 @@ export const DashboardWindow: React.FC = () => {
                             : "bg-slate-950/40 border-slate-700/60 text-slate-400 hover:border-slate-600"
                         }`}
                       >
-                        <div className="font-bold text-[11px] flex items-center gap-1">
-                          <span>🔬</span>
-                          <span>Глубокий</span>
+                        <div className="font-bold text-[11px]">
+                          Глубокий
                         </div>
                         <div className="text-[10px] text-slate-500 mt-0.5">~2048 токенов CoT</div>
                       </button>
@@ -958,10 +954,10 @@ export const DashboardWindow: React.FC = () => {
                       <button
                         type="button"
                         onClick={() => setShowDeepseekKey(!showDeepseekKey)}
-                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200 text-xs p-1"
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200 text-[10px] px-1 py-0.5 rounded border border-slate-700"
                         title={showDeepseekKey ? "Скрыть ключ" : "Показать ключ"}
                       >
-                        {showDeepseekKey ? "🙈" : "👁️"}
+                        {showDeepseekKey ? "Скрыть" : "Показать"}
                       </button>
                     </div>
                     <p className="text-[10px] text-slate-500 mt-1">
@@ -1019,10 +1015,7 @@ export const DashboardWindow: React.FC = () => {
                         <span>Проверка связи...</span>
                       </>
                     ) : (
-                      <>
-                        <span>⚡</span>
-                        <span>Проверить подключение (Ping)</span>
-                      </>
+                      <span>Проверить подключение (Ping)</span>
                     )}
                   </button>
 
@@ -1034,7 +1027,7 @@ export const DashboardWindow: React.FC = () => {
                           : "bg-red-950/60 border-red-500/50 text-red-300"
                       }`}
                     >
-                      <span className="text-sm">{testResult.success ? "✅" : "❌"}</span>
+                      <span className="text-xs font-mono font-bold">{testResult.success ? "[OK]" : "[FAIL]"}</span>
                       <span className="leading-snug">{testResult.message}</span>
                     </div>
                   )}
@@ -1070,14 +1063,11 @@ export const DashboardWindow: React.FC = () => {
             {/* Companion Personality Card */}
             <div className="space-y-4 bg-slate-900/60 p-4 rounded-xl border border-slate-800">
               <div className="flex items-center justify-between border-b border-slate-800 pb-2">
-                <div className="flex items-center gap-2">
-                  <span className="text-lg">🎭</span>
-                  <div>
-                    <h3 className="text-xs font-bold text-slate-200">Изначальный характер компаньона</h3>
-                    <p className="text-[10px] text-slate-400">
-                      Настройте базовый стиль, тон и характер. Если оставить поле пустым — характер будет чистым, и личность будет строиться исключительно на воспоминаниях.
-                    </p>
-                  </div>
+                <div>
+                  <h3 className="text-xs font-bold text-slate-200">Изначальный характер компаньона</h3>
+                  <p className="text-[10px] text-slate-400">
+                    Настройте базовый стиль, тон и характер. Если оставить поле пустым — характер будет чистым, и личность будет строиться исключительно на воспоминаниях.
+                  </p>
                 </div>
                 {persona.trim() === "" ? (
                   <span className="text-[10px] bg-slate-800 text-slate-400 border border-slate-700 px-2 py-0.5 rounded-full font-mono">
@@ -1101,8 +1091,8 @@ export const DashboardWindow: React.FC = () => {
                 <div className="flex items-center justify-between mt-2">
                   <p className="text-[10px] text-slate-500">
                     {persona.trim() === ""
-                      ? "✨ Личность компаньона строится исключительно на вашей памяти и фактах из SQLite."
-                      : "💡 Компаньон будет следовать этому характеру во всех ответах."}
+                      ? "Личность компаньона строится исключительно на вашей памяти и фактах из SQLite."
+                      : "Компаньон будет следовать этому характеру во всех ответах."}
                   </p>
                   <div className="flex gap-2">
                     {persona.trim() !== "" && (
@@ -1142,14 +1132,11 @@ export const DashboardWindow: React.FC = () => {
             {/* Global Hotkeys Card */}
             <div className="space-y-4 bg-slate-900/60 p-4 rounded-xl border border-slate-800">
               <div className="flex items-center justify-between border-b border-slate-800 pb-2">
-                <div className="flex items-center gap-2">
-                  <span className="text-lg">⌨️</span>
-                  <div>
-                    <h3 className="text-xs font-bold text-slate-200">Горячие клавиши (Global Hotkeys)</h3>
-                    <p className="text-[10px] text-slate-400">
-                      Системные комбинации клавиш для быстрого скрытия, вызова и закрытия компаньона
-                    </p>
-                  </div>
+                <div>
+                  <h3 className="text-xs font-bold text-slate-200">Горячие клавиши (Global Hotkeys)</h3>
+                  <p className="text-[10px] text-slate-400">
+                    Системные комбинации клавиш для быстрого скрытия, вызова и закрытия компаньона
+                  </p>
                 </div>
                 <button
                   type="button"
@@ -1248,14 +1235,11 @@ export const DashboardWindow: React.FC = () => {
             {/* System Profile & App Index Card */}
             <div className="space-y-4 bg-slate-900/60 p-4 rounded-xl border border-slate-800">
               <div className="flex items-center justify-between border-b border-slate-800 pb-2">
-                <div className="flex items-center gap-2">
-                  <span className="text-lg">🖥️</span>
-                  <div>
-                    <h3 className="text-xs font-bold text-slate-200">Системный профиль и Индекс приложений</h3>
-                    <p className="text-[10px] text-slate-400">
-                      Автоматическое распознавание окружения и динамический поиск софта по XDG-стандартам
-                    </p>
-                  </div>
+                <div>
+                  <h3 className="text-xs font-bold text-slate-200">Системный профиль и Индекс приложений</h3>
+                  <p className="text-[10px] text-slate-400">
+                    Автоматическое распознавание окружения и динамический поиск софта по XDG-стандартам
+                  </p>
                 </div>
                 {systemContext && (
                   <span className="text-[11px] bg-cyan-950/80 text-cyan-300 border border-cyan-800/60 px-2.5 py-0.5 rounded-full font-mono">
@@ -1313,7 +1297,9 @@ export const DashboardWindow: React.FC = () => {
                     </>
                   ) : (
                     <>
-                      <span>🔄</span>
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                      </svg>
                       <span>Обновить индекс приложений</span>
                     </>
                   )}
@@ -1450,7 +1436,7 @@ export const DashboardWindow: React.FC = () => {
                       : "text-slate-400 hover:bg-slate-800 hover:text-slate-200"
                   }`}
                 >
-                  🎨 Multi-Sprite / 4 GIFs (Idle, Talking, Error, Working)
+                  Multi-Sprite / 4 GIFs (Idle, Talking, Error, Working)
                 </button>
                 <button
                   type="button"
@@ -1464,7 +1450,7 @@ export const DashboardWindow: React.FC = () => {
                       : "text-slate-400 hover:bg-slate-800 hover:text-slate-200"
                   }`}
                 >
-                  ⚡ Single GIF / Image (Quick Import)
+                  Single GIF / Image (Quick Import)
                 </button>
               </div>
 
@@ -1521,7 +1507,9 @@ export const DashboardWindow: React.FC = () => {
                       </div>
                     ) : (
                       <>
-                        <span className="text-2xl">🖼️</span>
+                        <svg className="w-8 h-8 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                        </svg>
                         <div className="text-xs text-slate-300 font-medium">
                           Drag & drop GIF / image here, or <span className="text-cyan-400">browse</span>
                         </div>
@@ -1561,7 +1549,9 @@ export const DashboardWindow: React.FC = () => {
                         }
                       }}
                     />
-                    <span className="text-2xl">✨</span>
+                    <svg className="w-6 h-6 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                    </svg>
                     <span className="text-xs text-cyan-300 font-semibold">
                       Drop all 4 GIFs here at once, or click to choose multiple files
                     </span>
@@ -1739,7 +1729,7 @@ export const DashboardWindow: React.FC = () => {
                 <div>
                   {errorMessage && (
                     <span className="text-xs text-red-400 font-medium">
-                      ⚠️ {errorMessage}
+                      {errorMessage}
                     </span>
                   )}
                 </div>
@@ -1767,8 +1757,8 @@ export const DashboardWindow: React.FC = () => {
             {/* Header */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-4">
               <div>
-                <h2 className="text-lg font-bold text-slate-100 flex items-center gap-2">
-                  <span>🧠</span> Memory & Knowledge Base
+                <h2 className="text-lg font-bold text-slate-100">
+                  Memory & Knowledge Base
                 </h2>
                 <p className="text-xs text-slate-400 mt-0.5">
                   Долгосрочная база фактов SQLite (<code className="text-cyan-400">companion_memory.db</code>).
@@ -1792,10 +1782,7 @@ export const DashboardWindow: React.FC = () => {
             {/* Notification alert */}
             {memoryStatus && (
               <div className="bg-cyan-950/60 border border-cyan-500/40 text-cyan-300 text-xs px-3.5 py-2.5 rounded-lg flex items-center justify-between animate-fadeIn">
-                <span className="flex items-center gap-2">
-                  <span>ℹ️</span>
-                  <span>{memoryStatus}</span>
-                </span>
+                <span>{memoryStatus}</span>
                 <button
                   onClick={() => setMemoryStatus("")}
                   className="text-cyan-400 hover:text-cyan-200 text-sm ml-2"
@@ -1827,8 +1814,8 @@ export const DashboardWindow: React.FC = () => {
                     : "bg-slate-900/60 border-slate-800/80 hover:bg-slate-800/50"
                 }`}
               >
-                <div className="text-[10px] text-emerald-400 uppercase tracking-wider font-semibold flex items-center gap-1">
-                  <span>🛡️</span> Правила
+                <div className="text-[10px] text-emerald-400 uppercase tracking-wider font-semibold">
+                  Правила
                 </div>
                 <div className="text-base font-bold text-emerald-300 mt-0.5">
                   {memories.filter((m) => m.category === "preference" || m.category === "profile").length}
@@ -1843,8 +1830,8 @@ export const DashboardWindow: React.FC = () => {
                     : "bg-slate-900/60 border-slate-800/80 hover:bg-slate-800/50"
                 }`}
               >
-                <div className="text-[10px] text-cyan-400 uppercase tracking-wider font-semibold flex items-center gap-1">
-                  <span>💡</span> Факты
+                <div className="text-[10px] text-cyan-400 uppercase tracking-wider font-semibold">
+                  Факты
                 </div>
                 <div className="text-base font-bold text-cyan-300 mt-0.5">
                   {memories.filter((m) => m.category === "fact").length}
@@ -1859,8 +1846,8 @@ export const DashboardWindow: React.FC = () => {
                     : "bg-slate-900/60 border-slate-800/80 hover:bg-slate-800/50"
                 }`}
               >
-                <div className="text-[10px] text-amber-400 uppercase tracking-wider font-semibold flex items-center gap-1">
-                  <span>📁</span> Проекты
+                <div className="text-[10px] text-amber-400 uppercase tracking-wider font-semibold">
+                  Проекты
                 </div>
                 <div className="text-base font-bold text-amber-300 mt-0.5">
                   {memories.filter((m) => m.category === "project").length}
@@ -1875,8 +1862,8 @@ export const DashboardWindow: React.FC = () => {
                     : "bg-slate-900/60 border-slate-800/80 hover:bg-slate-800/50"
                 }`}
               >
-                <div className="text-[10px] text-purple-400 uppercase tracking-wider font-semibold flex items-center gap-1">
-                  <span>📝</span> Сводки
+                <div className="text-[10px] text-purple-400 uppercase tracking-wider font-semibold">
+                  Сводки
                 </div>
                 <div className="text-base font-bold text-purple-300 mt-0.5">
                   {memories.filter((m) => m.category === "summary").length}
@@ -1891,8 +1878,8 @@ export const DashboardWindow: React.FC = () => {
                 className="bg-slate-900 border border-cyan-500/30 rounded-xl p-4 space-y-3.5 shadow-lg shadow-cyan-950/20"
               >
                 <div className="flex items-center justify-between border-b border-slate-800 pb-2">
-                  <h3 className="text-xs font-bold text-cyan-300 uppercase tracking-wider flex items-center gap-1.5">
-                    <span>✨</span> Добавить новое правило или факт в SQLite
+                  <h3 className="text-xs font-bold text-cyan-300 uppercase tracking-wider">
+                    Добавить новое правило или факт в SQLite
                   </h3>
                   <button
                     type="button"
@@ -1911,10 +1898,10 @@ export const DashboardWindow: React.FC = () => {
                       onChange={(e) => setNewMemoryCategory(e.target.value)}
                       className="w-full bg-slate-950 border border-slate-800 rounded-lg text-xs px-3 py-2 text-slate-200 focus:border-cyan-400 outline-none"
                     >
-                      <option value="preference">🛡️ Правило / Предпочтение (preference)</option>
-                      <option value="fact">💡 Факт о пользователе (fact)</option>
-                      <option value="project">📁 Заметка по проекту (project)</option>
-                      <option value="profile">👤 Профиль пользователя (profile)</option>
+                      <option value="preference">Правило / Предпочтение (preference)</option>
+                      <option value="fact">Факт о пользователе (fact)</option>
+                      <option value="project">Заметка по проекту (project)</option>
+                      <option value="profile">Профиль пользователя (profile)</option>
                     </select>
                   </div>
 
@@ -1970,7 +1957,7 @@ export const DashboardWindow: React.FC = () => {
                     type="submit"
                     className="bg-cyan-600 hover:bg-cyan-500 text-white text-xs px-4 py-1.5 rounded-lg font-bold shadow-md shadow-cyan-600/20 active:scale-95"
                   >
-                    💾 Сохранить в память
+                    Сохранить в память
                   </button>
                 </div>
               </form>
@@ -2015,7 +2002,9 @@ export const DashboardWindow: React.FC = () => {
                   className="bg-slate-800/60 hover:bg-slate-800 text-slate-400 hover:text-slate-200 text-xs px-3 py-2.5 rounded-lg border border-slate-800"
                   title="Обновить список"
                 >
-                  🔄
+                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                  </svg>
                 </button>
               </div>
             </div>
@@ -2042,7 +2031,6 @@ export const DashboardWindow: React.FC = () => {
               if (filtered.length === 0) {
                 return (
                   <div className="bg-slate-900/40 border border-slate-800/80 rounded-xl p-8 text-center text-xs text-slate-500 space-y-3">
-                    <div className="text-2xl">🧠</div>
                     <p className="text-slate-400 font-medium">
                       {memoryQuery
                         ? "По вашему запросу ничего не найдено."
@@ -2064,7 +2052,7 @@ export const DashboardWindow: React.FC = () => {
                           };
                           await invoke("save_memory_entry", { item });
                           await loadAllMemories();
-                          setMemoryStatus("Добавлено правило: Не использовать эмодзи! 🛡️");
+                          setMemoryStatus("Добавлено правило: Не использовать эмодзи.");
                         }}
                         className="bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs px-3 py-1.5 rounded-lg border border-slate-700"
                       >
@@ -2081,7 +2069,7 @@ export const DashboardWindow: React.FC = () => {
                           };
                           await invoke("save_memory_entry", { item });
                           await loadAllMemories();
-                          setMemoryStatus("Добавлен факт: Разработка на Rust! 🦀");
+                          setMemoryStatus("Добавлен факт: Разработка на Rust.");
                         }}
                         className="bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs px-3 py-1.5 rounded-lg border border-slate-700"
                       >
@@ -2110,7 +2098,6 @@ export const DashboardWindow: React.FC = () => {
                       ? "bg-purple-500/10 text-purple-300 border-purple-500/30"
                       : "bg-slate-800 text-slate-300 border-slate-700";
 
-                    const badgeIcon = isPref ? "🛡️" : isFact ? "💡" : isProj ? "📁" : isSumm ? "📝" : "📌";
                     const badgeLabel = isPref
                       ? "Правило"
                       : isFact
@@ -2132,10 +2119,9 @@ export const DashboardWindow: React.FC = () => {
                         <div className="flex items-center justify-between gap-2">
                           <div className="flex items-center gap-2 flex-wrap">
                             <span
-                              className={`text-[10px] uppercase font-bold px-2 py-0.5 rounded-md border flex items-center gap-1 ${badgeStyle}`}
+                              className={`text-[10px] uppercase font-bold px-2 py-0.5 rounded-md border ${badgeStyle}`}
                             >
-                              <span>{badgeIcon}</span>
-                              <span>{badgeLabel}</span>
+                              {badgeLabel}
                             </span>
                             <span className="font-mono text-xs font-semibold text-slate-200">
                               {m.key}
@@ -2160,14 +2146,18 @@ export const DashboardWindow: React.FC = () => {
                                   className="text-slate-400 hover:text-cyan-300 p-1 rounded hover:bg-slate-800 text-xs transition-colors"
                                   title="Редактировать"
                                 >
-                                  ✏️
+                                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                                  </svg>
                                 </button>
                                 <button
                                   onClick={() => handleDeleteMemory(m.id, m.key)}
                                   className="text-slate-400 hover:text-red-400 p-1 rounded hover:bg-slate-800 text-xs transition-colors"
                                   title="Удалить"
                                 >
-                                  🗑️
+                                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                  </svg>
                                 </button>
                               </div>
                             )}

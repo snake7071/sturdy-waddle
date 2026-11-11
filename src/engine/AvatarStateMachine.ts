@@ -190,12 +190,12 @@ export class AvatarStateMachine {
    * Compaction with Glitch Reaction:
    * When conversation history approaches token thresholds, triggers background
    * summarization and visually expresses memory compaction with a glitch animation
-   * and playful remark ("Уплотняю память... 🧠").
+   * and remark ("Уплотняю память...").
    */
   public triggerMemoryCompaction(retainedTokensCount?: number): void {
     this.clearAllTimeouts();
 
-    const remark = "Уплотняю память... 🧠";
+    const remark = "Уплотняю память...";
     console.info(`[AvatarStateMachine] Memory compaction glitch triggered. Tokens retained: ${retainedTokensCount ?? "summarized"}`);
 
     this.transition("glitch", {
