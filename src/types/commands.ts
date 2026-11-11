@@ -111,6 +111,14 @@ export interface SaveMemoryCommand extends BaseCommand {
   };
 }
 
+export interface HideCompanionCommand extends BaseCommand {
+  type: "hide_companion";
+  securityLevel: "safe";
+  payload?: {
+    reason?: string;
+  };
+}
+
 export type CompanionCommand =
   | OpenUrlCommand
   | LaunchAppCommand
@@ -121,6 +129,7 @@ export type CompanionCommand =
   | CaptureScreenCommand
   | SetTimerCommand
   | SaveMemoryCommand
+  | HideCompanionCommand
   | MemoryCompactionCommand;
 
 // ============================================================================

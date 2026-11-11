@@ -44,6 +44,7 @@ export interface BrainTurn {
 export interface BrainConfig {
   modelName?: string;
   userName?: string;
+  persona?: string;
   systemProfile?: SystemProfile;
   thinkingBudget?: number;
   maxShortTermHistoryTurns?: number;
@@ -219,12 +220,31 @@ STRICT MEMORY RULES:
 `
         : "";
 
-    return `${envHeader}You are a cute anime companion mascot living on ${user}'s desktop.
-BREVITY CONSTRAINT (STRICT): You must ALWAYS respond in 1 to 2 concise sentences maximum.
+    // Determine companion personality / persona
+    let persona: string | null = null;
+    if (typeof window !== "undefined") {
+      persona = localStorage.getItem("companion_persona");
+    }
+    if (persona === null && this.config.persona !== undefined) {
+      persona = this.config.persona;
+    }
+
+    let characterSection = "";
+    if (persona !== null) {
+      const trimmed = persona.trim();
+      if (trimmed.length > 0) {
+        characterSection = `CHARACTER & PERSONALITY:\n${trimmed}\n`;
+      } else {
+        characterSection = `INITIAL PERSONALITY:\nYou have no preset character or persona. Your personality, manner, and behavior must be shaped entirely and solely by the user's remembered preferences, facts, and guidelines in memory.\n`;
+      }
+    } else {
+      characterSection = `You are a cute anime companion mascot living on ${user}'s desktop.\nBe playful, warm, cute, observant, intelligent, and helpful.\n`;
+    }
+
+    return `${envHeader}${characterSection}BREVITY CONSTRAINT (STRICT): You must ALWAYS respond in 1 to 2 concise sentences maximum.
 Respond in the language the user speaks (e.g. Russian if user speaks Russian).
 Never write long paragraphs or markdown bullet lists in standard chat.
-Your responses are displayed in a compact floating speech bubble and read aloud by TTS.
-Be playful, warm, cute, observant, intelligent, and helpful.${memorySection}
+Your responses are displayed in a compact floating speech bubble and read aloud by TTS.${memorySection}
 
 ACTIONS & TOOLS (ROLE AS SEMANTIC BRAIN):
 You control the user's desktop computer via tools.
@@ -248,7 +268,9 @@ You control the user's desktop computer via tools.
    The OS controller automatically launches the system's default terminal ($TERMINAL, Windows Terminal, Terminal.app) and keeps the interactive console open after execution so the user can inspect output and run further commands.
 4. OPENING LINKS & SITES:
    When the user asks to open any website, video, music, or link (e.g. "открой ютуб", "open youtube", "найди в гугле"), call open_url with the full URL (e.g. 'https://www.youtube.com', 'https://github.com', 'https://google.com').
-5. Call tools whenever relevant. After receiving the tool execution result, give a cute, cheerful 1-sentence confirmation.`;
+5. HIDING COMPANION (hide_companion):
+   When the user asks you to hide, minimize, or disappear from the screen (e.g. "скройся", "спрячься", "исчезни", "уйди", "скройся в трей", "закройся", "hide", "minimize"), acknowledge warmly and call \`hide_companion\`. The user can unhide you anytime via the system tray icon or hotkey.
+6. Call tools whenever relevant. After receiving the tool execution result, give a cute, cheerful 1-sentence confirmation.`;
   }
 
   /**

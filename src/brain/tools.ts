@@ -143,6 +143,20 @@ export const GEMINI_TOOLS = [
       required: ["category", "key", "content"],
     },
   },
+  {
+    name: "hide_companion",
+    description:
+      "Hides or minimizes the companion mascot from the screen into the system tray when requested by the user (e.g. 'скройся', 'спрячься', 'исчезни', 'уйди', 'hide', 'minimize'). The user can restore the companion anytime via the system tray icon or hotkey.",
+    parameters: {
+      type: "OBJECT",
+      properties: {
+        reason: {
+          type: "STRING",
+          description: "Optional acknowledgement note (e.g. 'скрытие по просьбе пользователя')",
+        },
+      },
+    },
+  },
 ] as const;
 
 /**
@@ -307,6 +321,23 @@ export const OPENAI_TOOLS = [
           },
         },
         required: ["category", "key", "content"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "hide_companion",
+      description:
+        "Hides or minimizes the companion mascot from the screen into the system tray when requested by the user (e.g. 'скройся', 'спрячься', 'исчезни', 'уйди', 'hide', 'minimize'). The user can restore the companion anytime via the system tray icon or hotkey.",
+      parameters: {
+        type: "object",
+        properties: {
+          reason: {
+            type: "string",
+            description: "Optional acknowledgement note (e.g. 'скрытие по просьбе пользователя')",
+          },
+        },
       },
     },
   },

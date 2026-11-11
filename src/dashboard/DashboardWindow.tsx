@@ -66,6 +66,32 @@ export const DashboardWindow: React.FC = () => {
   const [userName, setUserName] = useState(() => localStorage.getItem("companion_user_name") || "Developer");
   const [savedStatus, setSavedStatus] = useState("");
 
+  // Initial Persona / Personality State
+  const DEFAULT_PERSONA =
+    "Ты милый аниме-маскот компаньон, живущий на рабочем столе пользователя. Ты игривая, теплая, милая, наблюдательная, умная и отзывчивая.";
+  const [persona, setPersona] = useState(() => {
+    const saved = localStorage.getItem("companion_persona");
+    return saved !== null ? saved : DEFAULT_PERSONA;
+  });
+
+  // Global Hotkeys State
+  const DEFAULT_SHORTCUTS: Record<string, string> = {
+    toggle_mascot: "Ctrl+Shift+H",
+    open_settings: "Ctrl+Shift+S",
+    toggle_history: "Ctrl+Shift+L",
+    quit_app: "Ctrl+Shift+Q",
+  };
+  const [shortcuts, setShortcuts] = useState<Record<string, string>>(() => {
+    try {
+      const saved = localStorage.getItem("companion_shortcuts");
+      if (saved) {
+        return { ...DEFAULT_SHORTCUTS, ...JSON.parse(saved) };
+      }
+    } catch {}
+    return { ...DEFAULT_SHORTCUTS };
+  });
+  const [recordingAction, setRecordingAction] = useState<string | null>(null);
+
   // Memory Editor State
   const [memoryQuery, setMemoryQuery] = useState("");
   const [memories, setMemories] = useState<MemoryItem[]>([]);
@@ -247,6 +273,41 @@ export const DashboardWindow: React.FC = () => {
     }
   };
 
+  const handleKeyRecord = (e: React.KeyboardEvent, actionKey: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    if (e.key === "Escape") {
+      setRecordingAction(null);
+      return;
+    }
+
+    // Ignore standalone modifier presses
+    if (["Control", "Shift", "Alt", "Meta"].includes(e.key)) {
+      return;
+    }
+
+    const parts: string[] = [];
+    if (e.ctrlKey) parts.push("Ctrl");
+    if (e.altKey) parts.push("Alt");
+    if (e.shiftKey) parts.push("Shift");
+    if (e.metaKey) parts.push("Super");
+
+    // Format key name nicely
+    let keyName = e.key;
+    if (keyName === " ") keyName = "Space";
+    else if (keyName.length === 1) keyName = keyName.toUpperCase();
+
+    parts.push(keyName);
+    const combo = parts.join("+");
+
+    setShortcuts((prev) => ({
+      ...prev,
+      [actionKey]: combo,
+    }));
+    setRecordingAction(null);
+  };
+
   const handleSaveSettings = async () => {
     localStorage.setItem("ai_provider", provider);
     localStorage.setItem("gemini_api_key", geminiApiKey);
@@ -256,6 +317,15 @@ export const DashboardWindow: React.FC = () => {
     localStorage.setItem("deepseek_model_name", deepseekModelName);
     localStorage.setItem("deepseek_base_url", deepseekBaseUrl);
     localStorage.setItem("companion_user_name", userName);
+    localStorage.setItem("companion_persona", persona);
+    localStorage.setItem("companion_shortcuts", JSON.stringify(shortcuts));
+
+    // Update global shortcuts in Rust
+    try {
+      await invoke("update_global_shortcuts", { shortcuts });
+    } catch (err) {
+      console.warn("Could not update global shortcuts:", err);
+    }
 
     // Broadcast update across Tauri windows to apply immediately
     try {
@@ -265,6 +335,7 @@ export const DashboardWindow: React.FC = () => {
         geminiModelName,
         deepseekApiKey,
         deepseekModelName,
+        persona,
       });
     } catch (err) {
       console.warn("Could not broadcast ai-settings-changed:", err);
@@ -992,6 +1063,184 @@ export const DashboardWindow: React.FC = () => {
                 </button>
                 {savedStatus && (
                   <span className="text-xs text-emerald-400 animate-in fade-in font-medium">{savedStatus}</span>
+                )}
+              </div>
+            </div>
+
+            {/* Companion Personality Card */}
+            <div className="space-y-4 bg-slate-900/60 p-4 rounded-xl border border-slate-800">
+              <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                <div className="flex items-center gap-2">
+                  <span className="text-lg">🎭</span>
+                  <div>
+                    <h3 className="text-xs font-bold text-slate-200">Изначальный характер компаньона</h3>
+                    <p className="text-[10px] text-slate-400">
+                      Настройте базовый стиль, тон и характер. Если оставить поле пустым — характер будет чистым, и личность будет строиться исключительно на воспоминаниях.
+                    </p>
+                  </div>
+                </div>
+                {persona.trim() === "" ? (
+                  <span className="text-[10px] bg-slate-800 text-slate-400 border border-slate-700 px-2 py-0.5 rounded-full font-mono">
+                    Чистый характер
+                  </span>
+                ) : (
+                  <span className="text-[10px] bg-cyan-950/80 text-cyan-300 border border-cyan-800/60 px-2.5 py-0.5 rounded-full font-mono">
+                    Задан пользователем
+                  </span>
+                )}
+              </div>
+
+              <div>
+                <textarea
+                  value={persona}
+                  onChange={(e) => setPersona(e.target.value)}
+                  placeholder="Оставьте поле пустым, чтобы компаньон опирался исключительно на память, либо задайте уникальный характер (роль, манеру общения, особенности)..."
+                  rows={4}
+                  className="w-full bg-slate-800 text-xs text-white p-3 rounded-lg border border-slate-700 focus:border-cyan-400 outline-none font-sans leading-relaxed resize-none"
+                />
+                <div className="flex items-center justify-between mt-2">
+                  <p className="text-[10px] text-slate-500">
+                    {persona.trim() === ""
+                      ? "✨ Личность компаньона строится исключительно на вашей памяти и фактах из SQLite."
+                      : "💡 Компаньон будет следовать этому характеру во всех ответах."}
+                  </p>
+                  <div className="flex gap-2">
+                    {persona.trim() !== "" && (
+                      <button
+                        type="button"
+                        onClick={() => setPersona("")}
+                        className="text-[11px] text-slate-400 hover:text-red-400 border border-slate-700 hover:border-red-500/50 px-2.5 py-1 rounded transition-colors"
+                      >
+                        Очистить (без характера)
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => setPersona(DEFAULT_PERSONA)}
+                      className="text-[11px] text-slate-400 hover:text-cyan-300 border border-slate-700 hover:border-cyan-500/50 px-2.5 py-1 rounded transition-colors"
+                    >
+                      Сбросить по умолчанию
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between pt-2 border-t border-slate-800/80">
+                <button
+                  type="button"
+                  onClick={handleSaveSettings}
+                  className="bg-cyan-600 hover:bg-cyan-500 text-white text-xs px-4 py-1.5 rounded-lg font-medium transition-colors shadow-lg shadow-cyan-600/20"
+                >
+                  Применить характер
+                </button>
+                {savedStatus && (
+                  <span className="text-xs text-emerald-400 font-medium">{savedStatus}</span>
+                )}
+              </div>
+            </div>
+
+            {/* Global Hotkeys Card */}
+            <div className="space-y-4 bg-slate-900/60 p-4 rounded-xl border border-slate-800">
+              <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                <div className="flex items-center gap-2">
+                  <span className="text-lg">⌨️</span>
+                  <div>
+                    <h3 className="text-xs font-bold text-slate-200">Горячие клавиши (Global Hotkeys)</h3>
+                    <p className="text-[10px] text-slate-400">
+                      Системные комбинации клавиш для быстрого скрытия, вызова и закрытия компаньона
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShortcuts({ ...DEFAULT_SHORTCUTS })}
+                  className="text-[10px] text-slate-400 hover:text-cyan-300 transition-colors"
+                >
+                  Сбросить все клавиши
+                </button>
+              </div>
+
+              <div className="space-y-2.5">
+                {[
+                  {
+                    id: "toggle_mascot",
+                    label: "Показать / скрыть ассистента",
+                    desc: "Быстро свернуть компаньона в трей или показать на экране",
+                  },
+                  {
+                    id: "toggle_history",
+                    label: "Показать / скрыть историю диалога",
+                    desc: "Открыть или свернуть панель с историей всех сообщений и ответов",
+                  },
+                  {
+                    id: "open_settings",
+                    label: "Открыть окно настроек",
+                    desc: "Развернуть панель управления Companion Dashboard",
+                  },
+                  {
+                    id: "quit_app",
+                    label: "Закрыть приложение",
+                    desc: "Полностью завершить работу ассистента и выйти",
+                  },
+                ].map((item) => {
+                  const isRecording = recordingAction === item.id;
+                  const currentShortcut = shortcuts[item.id] || "";
+
+                  return (
+                    <div
+                      key={item.id}
+                      className="flex items-center justify-between bg-slate-950/50 p-2.5 rounded-lg border border-slate-800/80 gap-3"
+                    >
+                      <div>
+                        <div className="text-xs font-medium text-slate-200">{item.label}</div>
+                        <div className="text-[10px] text-slate-400">{item.desc}</div>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setRecordingAction(isRecording ? null : item.id)}
+                          onKeyDown={(e) => isRecording && handleKeyRecord(e, item.id)}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-mono border transition-all ${
+                            isRecording
+                              ? "bg-amber-500/20 border-amber-400 text-amber-200 animate-pulse ring-2 ring-amber-500/30"
+                              : "bg-slate-800 border-slate-700 text-cyan-300 hover:border-slate-600"
+                          }`}
+                          title="Нажмите для записи новой комбинации клавиш"
+                        >
+                          {isRecording ? "Нажмите клавиши... (Esc)" : currentShortcut || "Не назначено"}
+                        </button>
+                        {currentShortcut && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setShortcuts((prev) => ({
+                                ...prev,
+                                [item.id]: "",
+                              }))
+                            }
+                            className="text-slate-500 hover:text-red-400 text-xs px-1"
+                            title="Снять клавишу"
+                          >
+                            ✕
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div className="flex items-center justify-between pt-2 border-t border-slate-800/80">
+                <button
+                  type="button"
+                  onClick={handleSaveSettings}
+                  className="bg-cyan-600 hover:bg-cyan-500 text-white text-xs px-4 py-1.5 rounded-lg font-medium transition-colors shadow-lg shadow-cyan-600/20"
+                >
+                  Применить горячие клавиши
+                </button>
+                {savedStatus && (
+                  <span className="text-xs text-emerald-400 font-medium">{savedStatus}</span>
                 )}
               </div>
             </div>
