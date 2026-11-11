@@ -97,7 +97,24 @@ export class AvatarStateMachine {
   }
 
   /**
+   * Sets initial speech bubble text (e.g. restored from previous session)
+   */
+  public setInitialSpeech(text: string): void {
+    this.context.speechBubbleText = text;
+    this.notify();
+  }
+
+  /**
+   * Explicitly clears the speech bubble text
+   */
+  public clearSpeech(): void {
+    this.context.speechBubbleText = undefined;
+    this.notify();
+  }
+
+  /**
    * Explicit speech bubble display with auto-revert to idle (or perched)
+   * Keeps speechBubbleText persistent until replaced or explicitly dismissed.
    */
   public triggerSpeech(text: string, durationMs: number = 4000): void {
     this.clearAllTimeouts();
@@ -106,8 +123,9 @@ export class AvatarStateMachine {
       speechBubbleText: text,
     });
 
+    // Revert avatar sprite from "talking" back to resting state (idle/perched) after duration,
+    // but keep speechBubbleText persistent so the user can read the message without rushing!
     this.speechTimeout = setTimeout(() => {
-      this.context.speechBubbleText = undefined;
       this.transition(this.getRestingState());
     }, durationMs);
   }
@@ -123,7 +141,6 @@ export class AvatarStateMachine {
     });
 
     this.speechTimeout = setTimeout(() => {
-      this.context.speechBubbleText = undefined;
       this.transition("perched");
     }, 2500);
   }
@@ -135,7 +152,6 @@ export class AvatarStateMachine {
     this.context.isDragging = isDragging;
     if (isDragging) {
       this.clearAllTimeouts();
-      this.context.speechBubbleText = undefined;
       this.transition("idle");
     }
     this.notify();
@@ -224,10 +240,6 @@ export class AvatarStateMachine {
           speechBubbleText: event.message || "Task finished!",
           huskTask: undefined,
         });
-        setTimeout(() => {
-          this.context.speechBubbleText = undefined;
-          this.notify();
-        }, 2500);
         break;
 
       case "idle":

@@ -20,9 +20,26 @@ export interface ChatHistoryMessage {
 }
 
 export const MascotWindow: React.FC = () => {
-  const [fsm] = useState(() => new AvatarStateMachine("idle"));
+  const [fsm] = useState(() => {
+    const machine = new AvatarStateMachine("idle");
+    try {
+      const saved = localStorage.getItem("companion_chat_history");
+      if (saved) {
+        const history: ChatHistoryMessage[] = JSON.parse(saved);
+        const lastCompanionMsg = [...history].reverse().find(
+          (m) => m.role === "companion" && m.text && m.text.trim()
+        );
+        if (lastCompanionMsg) {
+          machine.setInitialSpeech(lastCompanionMsg.text);
+        }
+      }
+    } catch (e) {
+      console.warn("Failed to restore last speech bubble:", e);
+    }
+    return machine;
+  });
   const [avatarState, setAvatarState] = useState<AvatarState>("idle");
-  const [context, setContext] = useState<StateContext>({});
+  const [context, setContext] = useState<StateContext>(() => fsm.getContext());
   const [inputText, setInputText] = useState("");
   const [isInputOpen, setIsInputOpen] = useState(false);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
@@ -441,7 +458,8 @@ export const MascotWindow: React.FC = () => {
       {/* Speech Bubble (Differentiated by state: normal / error / needs_approval) */}
       {context.speechBubbleText && (
         <div
-          className={`absolute top-4 left-4 right-4 z-50 text-xs px-3 py-2 rounded-xl border shadow-2xl backdrop-blur-md animate-in fade-in zoom-in-95 duration-200 ${
+          onMouseDown={(e) => e.stopPropagation()}
+          className={`no-drag select-text absolute top-4 left-4 right-4 z-50 text-xs px-3 py-2 rounded-xl border shadow-2xl backdrop-blur-md animate-in fade-in zoom-in-95 duration-200 ${
             avatarState === "needs_approval"
               ? "bg-slate-900/95 text-amber-200 border-amber-500/70 shadow-amber-500/10"
               : avatarState === "error"
@@ -449,7 +467,23 @@ export const MascotWindow: React.FC = () => {
               : "bg-slate-900/95 text-cyan-200 border-cyan-500/40 shadow-cyan-500/10"
           }`}
         >
-          <p className="leading-relaxed font-sans">{context.speechBubbleText}</p>
+          {/* Close button for speech bubble */}
+          {avatarState !== "needs_approval" && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                fsm.clearSpeech();
+              }}
+              className="absolute top-1.5 right-1.5 text-slate-400 hover:text-white p-0.5 rounded transition-colors text-[10px] leading-none opacity-60 hover:opacity-100"
+              title="Закрыть"
+            >
+              ✕
+            </button>
+          )}
+
+          <div className="leading-relaxed font-sans max-h-36 overflow-y-auto pr-3 break-words">
+            {context.speechBubbleText}
+          </div>
 
           {/* Actionable buttons for needs_approval state */}
           {avatarState === "needs_approval" && (
