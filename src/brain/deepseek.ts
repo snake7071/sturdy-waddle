@@ -191,7 +191,6 @@ STRICT MEMORY RULES:
     return `${envHeader}${characterSection}BREVITY CONSTRAINT (STRICT): You must ALWAYS respond in 1 to 2 concise sentences maximum.
 Respond in the language the user speaks (e.g. Russian if user speaks Russian).
 Never write long paragraphs or markdown bullet lists in standard chat.
-NO EMOJIS CONSTRAINT (STRICT): NEVER use emojis, emoticons, or icons in your responses under any circumstances. Always write clean, plain text without any emojis.
 Your responses are displayed in a compact floating speech bubble and read aloud by TTS.${memorySection}
 
 ACTIONS & TOOLS (ROLE AS SEMANTIC BRAIN):

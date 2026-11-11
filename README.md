@@ -36,7 +36,6 @@
   - Open web links in the default browser (`open_url`).
   - Execute commands in persistent terminal windows (`execute_shell`).
   - Window perching (`window_perch`), screen snapshot capture (`capture_screen`), and countdown timers (`set_timer`).
-- **Strict Formatting Control**: Zero emojis constraint enforced in system prompts, UI elements, and dialogs.
 
 ### 3. Native OS Controller (`Hands` & `PlatformAdapter`)
 - **`PlatformAdapter` Architecture**: Extensible cross-platform abstraction layer for OS automation without hardcoded distribution paths.
