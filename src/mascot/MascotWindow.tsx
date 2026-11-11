@@ -25,6 +25,7 @@ export const MascotWindow: React.FC = () => {
   const [context, setContext] = useState<StateContext>(() => fsm.getContext());
   const [inputText, setInputText] = useState("");
   const [isInputOpen, setIsInputOpen] = useState(false);
+  const [isVisionMode, setIsVisionMode] = useState(false);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [chatHistory, setChatHistory] = useState<ChatHistoryMessage[]>(() => {
     try {
@@ -162,11 +163,13 @@ export const MascotWindow: React.FC = () => {
   const handleSendPrompt = async () => {
     if (!inputText.trim()) return;
     const prompt = inputText.trim();
+    const useVision = isVisionMode;
     setInputText("");
     setIsInputOpen(false);
+    setIsVisionMode(false);
 
     // Record user message into chat history
-    appendToHistory("user", prompt);
+    appendToHistory("user", useVision ? `[📸 Снимок экрана] ${prompt}` : prompt);
 
     // Immediate local intent check for hiding the companion
     if (
@@ -188,6 +191,18 @@ export const MascotWindow: React.FC = () => {
       return;
     }
 
+    let screenBase64: string | undefined = undefined;
+    if (useVision) {
+      fsm.transition("working", { speechBubbleText: "Делаю снимок экрана... 📸" });
+      try {
+        const rawB64 = await invoke<string>("capture_screen_snapshot");
+        screenBase64 = rawB64.startsWith("data:") ? rawB64 : `data:image/jpeg;base64,${rawB64}`;
+      } catch (err: any) {
+        console.warn("[MascotWindow] Screen capture failed:", err);
+        fsm.triggerError("Не удалось сделать снимок экрана. Отправляю только текст...", 3000);
+      }
+    }
+
     fsm.transition("working", { speechBubbleText: "Размышляю... 💭" });
 
     try {
@@ -197,7 +212,7 @@ export const MascotWindow: React.FC = () => {
 
       const result = await brainRef.current.sendPrompt(
         prompt,
-        undefined,
+        screenBase64,
         (accumulatedText) => {
           if (!hasSwitchedToTalking) {
             hasSwitchedToTalking = true;
@@ -305,13 +320,18 @@ export const MascotWindow: React.FC = () => {
         fsm.setPerched(geom.title);
         return { success: true, output: `Perched on window: ${geom.title}` };
       } else if (command.type === "capture_screen") {
-        const res: any = await invoke("capture_screen_snapshot", {
-          reason: command.payload.reason,
-        });
-        return {
-          success: res.success,
-          output: res.success ? "Screenshot captured" : res.error || "Capture failed",
-        };
+        try {
+          const res = await invoke<string>("capture_screen_snapshot");
+          return {
+            success: true,
+            output: `data:image/jpeg;base64,${res}`,
+          };
+        } catch (err: any) {
+          return {
+            success: false,
+            output: `Ошибка снимка экрана: ${err?.message || err}`,
+          };
+        }
       } else if (command.type === "set_timer") {
         setTimeout(() => {
           fsm.triggerSpeech(`⏰ Напоминание: ${command.payload.label}`, 6000);
@@ -676,13 +696,34 @@ export const MascotWindow: React.FC = () => {
 
       {/* Input Drawer */}
       {isInputOpen && (
-        <div className="absolute bottom-12 left-3 right-3 bg-slate-900/95 p-2 rounded-lg border border-cyan-500/50 shadow-2xl flex gap-1 z-50">
+        <div className="absolute bottom-12 left-3 right-3 bg-slate-900/95 p-2 rounded-lg border border-cyan-500/50 shadow-2xl flex items-center gap-1.5 z-50 backdrop-blur-md">
+          <button
+            type="button"
+            onClick={() => setIsVisionMode((prev) => !prev)}
+            className={`px-2 py-1 rounded text-xs transition-all flex items-center justify-center select-none ${
+              isVisionMode
+                ? "bg-cyan-500/30 text-cyan-300 border border-cyan-400 shadow-[0_0_10px_rgba(6,182,212,0.4)]"
+                : "bg-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-700 border border-slate-700"
+            }`}
+            title={
+              isVisionMode
+                ? "Режим зрения включен (снимок экрана будет прикреплен к сообщению)"
+                : "Включить зрение (прикрепить снимок экрана к сообщению)"
+            }
+            aria-label="Toggle Vision Mode"
+          >
+            👁️
+          </button>
           <input
             type="text"
             value={inputText}
             onChange={(e) => setInputText(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && handleSendPrompt()}
-            placeholder="Talk to companion..."
+            placeholder={
+              isVisionMode
+                ? "Спросить по текущему экрану... 👁️"
+                : "Talk to companion..."
+            }
             className="flex-1 bg-slate-800 text-xs text-white px-2 py-1 rounded outline-none border border-slate-700 focus:border-cyan-400 font-mono"
             autoFocus
           />

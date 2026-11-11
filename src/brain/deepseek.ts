@@ -8,6 +8,7 @@
 import { sanitizeForLLM } from "./sanitizer";
 import { CompanionCommand } from "../types/commands";
 import { OPENAI_TOOLS } from "./tools";
+import { BrainProvider, CommandExecutor, SendPromptResult } from "./provider";
 
 export interface SystemProfile {
   os_name: string;
@@ -20,7 +21,7 @@ export interface SystemProfile {
 
 export interface DeepSeekMessage {
   role: "system" | "user" | "assistant" | "tool";
-  content?: string | null;
+  content?: string | any[] | null;
   reasoning_content?: string;
   tool_calls?: Array<{
     id: string;
@@ -42,9 +43,7 @@ export interface DeepSeekBrainConfig {
   maxShortTermHistoryTurns?: number;
 }
 
-export type CommandExecutor = (
-  command: CompanionCommand
-) => Promise<{ success: boolean; output: string }>;
+export type { CommandExecutor };
 
 export function formatDeepSeekError(err: any): string {
   if (!err) return "DeepSeek AI servers are busy. Please try again in a few seconds.";
@@ -97,7 +96,7 @@ export function formatDeepSeekError(err: any): string {
   return clean || "DeepSeek servers are busy. Please try again.";
 }
 
-export class DeepSeekBrain {
+export class DeepSeekBrain implements BrainProvider {
   private shortTermHistory: DeepSeekMessage[] = [];
   private config: DeepSeekBrainConfig;
   private onMemoryCompactionGlitch?: (summary: string) => void;
@@ -225,7 +224,12 @@ You control the user's desktop computer via tools.
      * If a command succeeded and returned what was requested, summarize and speak the answer in 1-2 sentences.
      * If a command failed, returned an error, or returned empty output (for example, searching for a file in ~ produced no results): DO NOT GIVE UP IMMEDIATELY! Think about why, and call another tool to try alternative directories (e.g. ~/Downloads, ~/Documents), case-insensitive patterns (e.g. \`find ~ -iname "*pattern*"\`), or different commands.
      * You can invoke multiple consecutive tool calls across turns until you reach the goal.
-     * However, if after trying multiple sensible attempts nothing is found or possible, politely explain in 1-2 sentences that you couldn't find or complete it.`;
+     * However, if after trying multiple sensible attempts nothing is found or possible, politely explain in 1-2 sentences that you couldn't find or complete it.
+7. VISION & SCREEN AWARENESS:
+   When an image/screenshot is attached to the user's prompt (Vision Mode), you have direct visual sight of the user's screen.
+   - Carefully examine the visual content of the screenshot to answer questions about what is visible, open windows, text, code, or desktop layout.
+   - You have true multimodal vision — describe what you see directly! Never claim you cannot see the image or that you only see file size when an image is provided.
+   - Do NOT invoke 'capture_screen' if a screenshot is already attached to the prompt.`;
   }
 
   /**
@@ -244,7 +248,11 @@ You control the user's desktop computer via tools.
       if (m.role === "tool") continue;
 
       if (m.role === "user") {
-        const text = (m.content || "").trim();
+        const text = typeof m.content === "string"
+          ? m.content.trim()
+          : Array.isArray(m.content)
+          ? m.content.map((c: any) => (typeof c === "string" ? c : c.text || "")).join(" ").trim()
+          : "";
         if (text) {
           if (clean.length > 0 && clean[clean.length - 1].role === "user") {
             clean[clean.length - 1].content += `\n${text}`;
@@ -253,7 +261,7 @@ You control the user's desktop computer via tools.
           }
         }
       } else if (m.role === "assistant") {
-        const text = (m.content || "").trim();
+        const text = typeof m.content === "string" ? m.content.trim() : "";
         if (text) {
           if (clean.length > 0 && clean[clean.length - 1].role === "assistant") {
             clean[clean.length - 1].content += `\n${text}`;
@@ -280,11 +288,11 @@ You control the user's desktop computer via tools.
 
   public async sendPrompt(
     rawPrompt: string,
-    _imageAttachmentBase64?: string,
+    imageBase64?: string,
     onChunk?: (accumulatedText: string) => void,
     commandExecutor?: CommandExecutor,
     onThinking?: (thoughtText: string) => void
-  ): Promise<{ responseText: string; toolCalls: CompanionCommand[] }> {
+  ): Promise<SendPromptResult> {
     const apiKey = this.getApiKey();
     const model = this.getModelName();
     const baseUrl = this.getBaseUrl();
@@ -397,7 +405,17 @@ You control the user's desktop computer via tools.
     }
 
     const systemInstruction = this.getSystemPrompt(memoryContext);
-    const userMessage: DeepSeekMessage = { role: "user", content: sanitizedPrompt };
+    let userContent: any = sanitizedPrompt;
+    if (imageBase64) {
+      const formattedUrl = imageBase64.startsWith("data:")
+        ? imageBase64
+        : `data:image/jpeg;base64,${imageBase64}`;
+      userContent = [
+        { type: "text", text: sanitizedPrompt },
+        { type: "image_url", image_url: { url: formattedUrl } },
+      ];
+    }
+    const userMessage: DeepSeekMessage = { role: "user", content: userContent };
 
     const messagesToSend: DeepSeekMessage[] = [
       { role: "system", content: systemInstruction },
@@ -420,7 +438,9 @@ You control the user's desktop computer via tools.
 
       // Tools supported primarily on deepseek-chat
       if (!isReasoner && allowTools) {
-        payload.tools = OPENAI_TOOLS;
+        payload.tools = imageBase64
+          ? OPENAI_TOOLS.filter((t: any) => t.function.name !== "capture_screen")
+          : OPENAI_TOOLS;
         payload.temperature = 0.7;
       }
 
@@ -588,15 +608,21 @@ You control the user's desktop computer via tools.
       };
 
       const toolResponseMessages: DeepSeekMessage[] = [];
+      let capturedScreenshotBase64: string | null = null;
       for (let i = 0; i < iterationCommands.length; i++) {
         const cmd = iterationCommands[i];
         const tc = toolCallsList[i];
         try {
           const execRes = await commandExecutor(cmd);
+          let outputText = execRes.output;
+          if (cmd.type === "capture_screen" && execRes.success && outputText.includes("base64,")) {
+            capturedScreenshotBase64 = outputText;
+            outputText = "Снимок экрана успешно сделан и прикреплен.";
+          }
           toolResponseMessages.push({
             role: "tool",
             tool_call_id: tc.id,
-            content: JSON.stringify({ success: execRes.success, output: execRes.output }),
+            content: JSON.stringify({ success: execRes.success, output: outputText }),
           });
         } catch (err: any) {
           toolResponseMessages.push({
@@ -609,6 +635,16 @@ You control the user's desktop computer via tools.
 
       currentReqMessages.push(assistantToolCallMessage);
       currentReqMessages.push(...toolResponseMessages);
+
+      if (capturedScreenshotBase64) {
+        currentReqMessages.push({
+          role: "user",
+          content: [
+            { type: "text", text: "Вот снимок экрана, который был только что захвачен. Изучи его и ответь на мой вопрос." },
+            { type: "image_url", image_url: { url: capturedScreenshotBase64 } },
+          ],
+        });
+      }
 
       // If reached maximum iterations, execute one final non-tool pass to summarize the findings
       if (iteration >= MAX_TOOL_ITERATIONS) {

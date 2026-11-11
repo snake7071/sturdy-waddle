@@ -8,6 +8,7 @@ import { GoogleGenAI } from "@google/genai";
 import { sanitizeForLLM } from "./sanitizer";
 import { CompanionCommand } from "../types/commands";
 import { GEMINI_TOOLS } from "./tools";
+import { BrainProvider, CommandExecutor, SendPromptResult } from "./provider";
 
 export interface SystemProfile {
   os_name: string;
@@ -51,9 +52,7 @@ export interface BrainConfig {
   compactionThresholdTokens?: number;
 }
 
-export type CommandExecutor = (
-  command: CompanionCommand
-) => Promise<{ success: boolean; output: string }>;
+export type { CommandExecutor };
 
 /**
  * Extracts a human-friendly message from Gemini API errors, preventing raw JSON dumps.
@@ -119,7 +118,7 @@ function formatGeminiError(err: any): string {
   return clean || "Google AI servers are overloaded. Please try again in a few seconds.";
 }
 
-export class GeminiBrain {
+export class GeminiBrain implements BrainProvider {
   private shortTermHistory: BrainTurn[] = [];
   private config: BrainConfig;
   private onMemoryCompactionGlitch?: (summary: string) => void;
@@ -246,6 +245,12 @@ Respond in the language the user speaks (e.g. Russian if user speaks Russian).
 Never write long paragraphs or markdown bullet lists in standard chat.
 Your responses are displayed in a compact floating speech bubble and read aloud by TTS.${memorySection}
 
+VISION & SCREEN AWARENESS:
+When an image/screenshot is attached to the user prompt (Vision Mode), you have direct visual perception of their screen.
+- Carefully examine the visual content of the screenshot to answer questions about what is visible, open windows, text, code, or desktop layout.
+- You have true multimodal vision — describe what you see directly! Never claim you cannot see the image or that you only see file size when an image is provided.
+- Do not invoke 'capture_screen' if a screenshot is already attached to the prompt.
+
 ACTIONS & TOOLS (ROLE AS SEMANTIC BRAIN):
 You control the user's desktop computer via tools.
 1. LONG-TERM MEMORY (save_memory):
@@ -330,11 +335,11 @@ You control the user's desktop computer via tools.
    */
   public async sendPrompt(
     rawPrompt: string,
-    imageAttachmentBase64?: string,
+    imageBase64?: string,
     onChunk?: (accumulatedText: string) => void,
     commandExecutor?: CommandExecutor,
     onThinking?: (thoughtText: string) => void
-  ): Promise<{ responseText: string; toolCalls: CompanionCommand[] }> {
+  ): Promise<SendPromptResult> {
     // 1. Resolve client dynamically on-demand
     const ai = this.getGeminiClient();
 
@@ -365,11 +370,11 @@ You control the user's desktop computer via tools.
 
     // 4. Build current turn
     const currentParts: BrainPart[] = [{ text: sanitizedPrompt }];
-    if (imageAttachmentBase64) {
-      const mimeType = imageAttachmentBase64.startsWith("data:image/png")
+    if (imageBase64) {
+      const mimeType = imageBase64.startsWith("data:image/png")
         ? "image/png"
         : "image/jpeg";
-      const base64Data = imageAttachmentBase64.replace(/^data:image\/\w+;base64,/, "");
+      const base64Data = imageBase64.replace(/^data:image\/\w+;base64,/, "");
       currentParts.push({
         inlineData: {
           mimeType,
@@ -411,7 +416,10 @@ You control the user's desktop computer via tools.
       };
 
       if (allowTools) {
-        cfg.tools = [{ functionDeclarations: GEMINI_TOOLS as any }];
+        const activeTools = imageBase64
+          ? GEMINI_TOOLS.filter((t) => t.name !== "capture_screen")
+          : GEMINI_TOOLS;
+        cfg.tools = [{ functionDeclarations: activeTools as any }];
       }
 
       if (thinkingBudget > 0 && !isLite) {
@@ -456,6 +464,7 @@ You control the user's desktop computer via tools.
       let iterationText = "";
       const rawFunctionCalls: Array<{ id?: string; name: string; args: Record<string, any> }> = [];
       const seenCallKeys = new Set<string>();
+      const modelCandidateParts: any[] = [];
 
       let responseStream: any = null;
       try {
@@ -474,6 +483,9 @@ You control the user's desktop computer via tools.
 
           if (chunk.candidates && chunk.candidates[0]?.content?.parts) {
             for (const part of chunk.candidates[0].content.parts) {
+              if (part.functionCall || (part.text && !part.thought)) {
+                modelCandidateParts.push(part);
+              }
               if (part.thought) {
                 if (onThinking && part.text) {
                   onThinking(part.text);
@@ -516,6 +528,10 @@ You control the user's desktop computer via tools.
         if (iteration === 1 && !iterationText && rawFunctionCalls.length === 0) {
           throw new Error(formatGeminiError(streamErr));
         }
+        if (!finalAccumulatedText && !iterationText) {
+          throw new Error(formatGeminiError(streamErr));
+        }
+        break;
       }
 
       if (iterationText.trim()) {
@@ -548,16 +564,37 @@ You control the user's desktop computer via tools.
         const fc = rawFunctionCalls[i];
         try {
           const execResult = await commandExecutor(cmd);
+          let responseOutput = execResult.output;
+          let attachedImageBase64: string | null = null;
+
+          if (
+            cmd.type === "capture_screen" &&
+            execResult.success &&
+            responseOutput.includes("base64,")
+          ) {
+            attachedImageBase64 = responseOutput.replace(/^data:image\/\w+;base64,/, "");
+            responseOutput = "Снимок экрана успешно получен и прикреплен.";
+          }
+
           toolResponses.push({
             functionResponse: {
               id: fc.id,
               name: fc.name,
               response: {
-                output: execResult.output,
+                output: responseOutput,
                 success: execResult.success,
               },
             },
           });
+
+          if (attachedImageBase64) {
+            toolResponses.push({
+              inlineData: {
+                mimeType: "image/jpeg",
+                data: attachedImageBase64,
+              },
+            });
+          }
         } catch (err: any) {
           toolResponses.push({
             functionResponse: {
@@ -572,15 +609,18 @@ You control the user's desktop computer via tools.
         }
       }
 
-      // Construct turns to feed back into model context
+      // Construct turns to feed back into model context, preserving thoughtSignature on functionCall parts
       const modelCallTurn: BrainTurn = {
         role: "model",
-        parts: [
-          ...(iterationText ? [{ text: iterationText }] : []),
-          ...rawFunctionCalls.map((fc) => ({
-            functionCall: { id: fc.id, name: fc.name, args: fc.args },
-          })),
-        ],
+        parts:
+          modelCandidateParts.length > 0
+            ? modelCandidateParts
+            : [
+                ...(iterationText ? [{ text: iterationText }] : []),
+                ...rawFunctionCalls.map((fc) => ({
+                  functionCall: { id: fc.id, name: fc.name, args: fc.args },
+                })),
+              ],
       };
 
       const toolResponseTurn: BrainTurn = {

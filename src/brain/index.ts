@@ -6,8 +6,10 @@
 
 import { GeminiBrain, BrainConfig as GeminiConfig } from "./gemini";
 import { DeepSeekBrain, DeepSeekBrainConfig } from "./deepseek";
-import { CompanionCommand } from "../types/commands";
 import { listen } from "@tauri-apps/api/event";
+import { BrainProvider, CommandExecutor, SendPromptResult } from "./provider";
+
+export * from "./provider";
 
 export type AIProvider = "gemini" | "deepseek";
 
@@ -20,17 +22,13 @@ export interface SystemProfile {
   default_shell: string;
 }
 
-export type CommandExecutor = (
-  command: CompanionCommand
-) => Promise<{ success: boolean; output: string }>;
-
 export interface UnifiedBrainConfig {
   provider?: AIProvider;
   geminiConfig?: GeminiConfig;
   deepseekConfig?: DeepSeekBrainConfig;
 }
 
-export class UnifiedBrain {
+export class UnifiedBrain implements BrainProvider {
   private activeProvider: AIProvider;
   private geminiBrain: GeminiBrain;
   private deepseekBrain: DeepSeekBrain;
@@ -106,17 +104,17 @@ export class UnifiedBrain {
    */
   public async sendPrompt(
     rawPrompt: string,
-    imageAttachmentBase64?: string,
+    imageBase64?: string,
     onChunk?: (accumulatedText: string) => void,
     commandExecutor?: CommandExecutor,
     onThinking?: (thoughtText: string) => void
-  ): Promise<{ responseText: string; toolCalls: CompanionCommand[] }> {
+  ): Promise<SendPromptResult> {
     const provider = this.getActiveProvider();
 
     if (provider === "deepseek") {
       return await this.deepseekBrain.sendPrompt(
         rawPrompt,
-        imageAttachmentBase64,
+        imageBase64,
         onChunk,
         commandExecutor,
         onThinking
@@ -124,7 +122,7 @@ export class UnifiedBrain {
     } else {
       return await this.geminiBrain.sendPrompt(
         rawPrompt,
-        imageAttachmentBase64,
+        imageBase64,
         onChunk,
         commandExecutor,
         onThinking

@@ -59,7 +59,7 @@ export const GEMINI_TOOLS = [
   {
     name: "capture_screen",
     description:
-      "Captures a single screenshot on user demand or error diagnosis.",
+      "Captures a single screenshot on user demand or error diagnosis. DO NOT call this if an image is already attached to the user's prompt (Vision Mode).",
     parameters: {
       type: "OBJECT",
       properties: {
@@ -230,7 +230,7 @@ export const OPENAI_TOOLS = [
     function: {
       name: "capture_screen",
       description:
-        "Captures a single screenshot on user demand or error diagnosis.",
+        "Captures a single screenshot on user demand or error diagnosis. DO NOT call this if an image is already attached to the user's prompt (Vision Mode).",
       parameters: {
         type: "object",
         properties: {

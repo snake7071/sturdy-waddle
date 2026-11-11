@@ -287,7 +287,7 @@ pub fn run() {
             ipc::delete_memory,
             ipc::get_relevant_memory_context,
             ipc::set_window_clickthrough,
-            ipc::capture_screen_snapshot,
+            hands::vision::capture_screen_snapshot,
             show_dashboard,
             hide_mascot,
             toggle_mascot,

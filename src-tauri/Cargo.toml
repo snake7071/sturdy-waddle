@@ -25,6 +25,8 @@ regex = "1"
 thiserror = "2"
 async-trait = "0.1"
 base64 = "0.22"
+xcap = "0.9"
+image = { version = "0.25", default-features = false, features = ["jpeg"] }
 
 [profile.release]
 codegen-units = 1

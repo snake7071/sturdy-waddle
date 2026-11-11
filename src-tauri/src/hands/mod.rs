@@ -3,6 +3,7 @@
 
 pub mod indexer;
 pub mod system_info;
+pub mod vision;
 
 pub use indexer::{AppIndexer, InstalledApp};
 pub use system_info::{get_system_profile, SystemProfile};
