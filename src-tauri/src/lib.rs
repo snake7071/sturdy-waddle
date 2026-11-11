@@ -105,9 +105,9 @@ fn update_global_shortcuts(
 }
 
 #[tauri::command]
-fn open_devtools(app: tauri::AppHandle) {
-    if let Some(mascot) = app.get_webview_window("mascot") {
-        #[cfg(debug_assertions)]
+fn open_devtools(_app: tauri::AppHandle) {
+    #[cfg(debug_assertions)]
+    if let Some(mascot) = _app.get_webview_window("mascot") {
         mascot.open_devtools();
     }
 }
