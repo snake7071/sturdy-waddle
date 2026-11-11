@@ -20,24 +20,7 @@ export interface ChatHistoryMessage {
 }
 
 export const MascotWindow: React.FC = () => {
-  const [fsm] = useState(() => {
-    const machine = new AvatarStateMachine("idle");
-    try {
-      const saved = localStorage.getItem("companion_chat_history");
-      if (saved) {
-        const history: ChatHistoryMessage[] = JSON.parse(saved);
-        const lastCompanionMsg = [...history].reverse().find(
-          (m) => m.role === "companion" && m.text && m.text.trim()
-        );
-        if (lastCompanionMsg) {
-          machine.setInitialSpeech(lastCompanionMsg.text);
-        }
-      }
-    } catch (e) {
-      console.warn("Failed to restore last speech bubble:", e);
-    }
-    return machine;
-  });
+  const [fsm] = useState(() => new AvatarStateMachine("idle"));
   const [avatarState, setAvatarState] = useState<AvatarState>("idle");
   const [context, setContext] = useState<StateContext>(() => fsm.getContext());
   const [inputText, setInputText] = useState("");
