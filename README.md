@@ -172,7 +172,9 @@ sudo apt-get update && sudo apt-get install -y \
   libxdo-dev \
   libssl-dev \
   libayatana-appindicator3-dev \
-  librsvg2-dev
+  librsvg2-dev \
+  libpipewire-0.3-dev \
+  libspa-0.2-dev
 ```
 
 #### Arch Linux
