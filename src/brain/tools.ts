@@ -92,7 +92,7 @@ export const GEMINI_TOOLS = [
   {
     name: "execute_shell",
     description:
-      "Executes a shell command. Destructive: requires explicit user modal approval.",
+      "Executes a shell command on the host (e.g. searching for files with find/grep, inspecting directories with ls, checking system state or processes). Returns command stdout/stderr. Safe read commands run automatically; destructive commands require user confirmation. Use this whenever you need to find files, search directories, inspect system details, or verify status before answering.",
     parameters: {
       type: "OBJECT",
       properties: {
@@ -269,7 +269,7 @@ export const OPENAI_TOOLS = [
     function: {
       name: "execute_shell",
       description:
-        "Executes a shell command. Destructive: requires explicit user modal approval.",
+        "Executes a shell command on the host (e.g. searching for files with find/grep, inspecting directories with ls, checking system state or processes). Returns command stdout/stderr. Safe read commands run automatically; destructive commands require user confirmation. Use this whenever you need to find files, search directories, inspect system details, or verify status before answering.",
       parameters: {
         type: "object",
         properties: {

@@ -335,9 +335,23 @@ export const MascotWindow: React.FC = () => {
           command: command.payload.command,
           cwd: command.payload.cwd,
         });
+        const stdout = (res.stdout || "").trim();
+        const stderr = (res.stderr || "").trim();
+        let formattedOutput = "";
+        if (stdout && stderr) {
+          formattedOutput = `stdout:\n${stdout}\nstderr:\n${stderr}`;
+        } else if (stdout) {
+          formattedOutput = stdout;
+        } else if (stderr) {
+          formattedOutput = `stderr: ${stderr}`;
+        } else {
+          formattedOutput = res.success
+            ? "(Команда завершилась успешно, вывод пуст / ничего не найдено)"
+            : "(Команда завершилась с ошибкой, вывод пуст)";
+        }
         return {
           success: res.success,
-          output: res.stdout || res.stderr || "Command executed",
+          output: formattedOutput,
         };
       } else if (command.type === "hide_companion") {
         const farewell = "Хорошо, скрываюсь! Нажмите на иконку в трее или горячую клавишу, чтобы вернуть меня. 🐾";

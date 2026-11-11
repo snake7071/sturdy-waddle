@@ -270,7 +270,14 @@ You control the user's desktop computer via tools.
    When the user asks to open any website, video, music, or link (e.g. "открой ютуб", "open youtube", "найди в гугле"), call open_url with the full URL (e.g. 'https://www.youtube.com', 'https://github.com', 'https://google.com').
 5. HIDING COMPANION (hide_companion):
    When the user asks you to hide, minimize, or disappear from the screen (e.g. "скройся", "спрячься", "исчезни", "уйди", "скройся в трей", "закройся", "hide", "minimize"), acknowledge warmly and call \`hide_companion\`. The user can unhide you anytime via the system tray icon or hotkey.
-6. Call tools whenever relevant. After receiving the tool execution result, give a cute, cheerful 1-sentence confirmation.`;
+6. MULTI-STEP INVESTIGATION & OUTPUT EVALUATION (REACT LOOP):
+   Whenever you execute tools (e.g. searching for files with execute_shell, inspecting directories, running commands or diagnostics):
+   - You will receive the actual stdout, stderr, and success status of the command.
+   - CAREFULLY EVALUATE THE TOOL OUTPUT:
+     * If a command succeeded and returned what was requested, summarize and speak the answer in 1-2 sentences.
+     * If a command failed, returned an error, or returned empty output (for example, searching for a file in ~ produced no results): DO NOT GIVE UP IMMEDIATELY! Think about why, and call another tool to try alternative directories (e.g. ~/Downloads, ~/Documents), case-insensitive patterns (e.g. \`find ~ -iname "*pattern*"\`), or different commands.
+     * You can invoke multiple consecutive tool calls across turns until you reach the goal.
+     * However, if after trying multiple sensible attempts nothing is found or possible, politely explain in 1-2 sentences that you couldn't find or complete it.`;
   }
 
   /**
@@ -395,14 +402,17 @@ You control the user's desktop computer via tools.
 
     const thinkingBudget = storedBudget !== null ? parseInt(storedBudget, 10) : (this.config.thinkingBudget ?? 1024);
 
-    const buildStreamConfig = (model: string) => {
+    const buildStreamConfig = (model: string, allowTools: boolean = true) => {
       const isLite = model.includes("flash-lite");
       const cfg: any = {
         systemInstruction,
         temperature: 0.7,
         maxOutputTokens: 2048,
-        tools: [{ functionDeclarations: GEMINI_TOOLS as any }],
       };
+
+      if (allowTools) {
+        cfg.tools = [{ functionDeclarations: GEMINI_TOOLS as any }];
+      }
 
       if (thinkingBudget > 0 && !isLite) {
         cfg.thinkingConfig = {
@@ -413,12 +423,12 @@ You control the user's desktop computer via tools.
       return cfg;
     };
 
-    const fetchStreamWithFallback = async (requestContents: any[]) => {
+    const fetchStreamWithFallback = async (requestContents: any[], allowTools: boolean = true) => {
       const fetchFromModel = async (model: string) => {
         return await ai.models.generateContentStream({
           model,
           contents: requestContents,
-          config: buildStreamConfig(model),
+          config: buildStreamConfig(model, allowTools),
         });
       };
 
@@ -433,195 +443,188 @@ You control the user's desktop computer via tools.
       }
     };
 
-    // Step 1: Initial stream response (accumulate text and function calls, NO mid-stream execution)
-    let accumulatedText = "";
-    const rawFunctionCalls: Array<{ id?: string; name: string; args: Record<string, any> }> = [];
-    const seenCallKeys = new Set<string>();
+    // Multi-turn Agentic ReAct Loop: allows model to evaluate tool outputs and try alternative attempts
+    const MAX_TOOL_ITERATIONS = 5;
+    let iteration = 0;
+    const allExecutedCommands: CompanionCommand[] = [];
+    const currentConversation: any[] = [...contents];
+    let finalAccumulatedText = "";
 
-    let responseStream: any = null;
-    try {
-      responseStream = await fetchStreamWithFallback(contents);
-    } catch (err: any) {
-      console.error("[GeminiBrain] Failed to start stream:", err);
-      throw new Error(formatGeminiError(err));
-    }
+    while (iteration < MAX_TOOL_ITERATIONS) {
+      iteration++;
 
-    try {
-      for await (const chunk of responseStream) {
-        let chunkText = "";
+      let iterationText = "";
+      const rawFunctionCalls: Array<{ id?: string; name: string; args: Record<string, any> }> = [];
+      const seenCallKeys = new Set<string>();
 
-        if (chunk.candidates && chunk.candidates[0]?.content?.parts) {
-          for (const part of chunk.candidates[0].content.parts) {
-            if (part.thought) {
-              if (onThinking && part.text) {
-                onThinking(part.text);
-              }
-            } else if (part.text) {
-              chunkText += part.text;
-            }
-          }
-        } else if (chunk.text) {
-          chunkText = chunk.text;
+      let responseStream: any = null;
+      try {
+        responseStream = await fetchStreamWithFallback(currentConversation, true);
+      } catch (err: any) {
+        console.error(`[GeminiBrain] Failed to start stream on iteration ${iteration}:`, err);
+        if (iteration === 1) {
+          throw new Error(formatGeminiError(err));
         }
+        break;
+      }
 
-        if (chunkText) {
-          accumulatedText += chunkText;
-          if (onChunk) {
-            onChunk(accumulatedText);
-          }
-        }
+      try {
+        for await (const chunk of responseStream) {
+          let chunkText = "";
 
-        // Buffer function calls strictly without executing during stream chunks
-        const functionCalls = chunk.functionCalls;
-        if (functionCalls && Array.isArray(functionCalls)) {
-          for (const fc of functionCalls) {
-            if (fc.name) {
-              const callKey = `${fc.id || ""}:${fc.name}:${JSON.stringify(fc.args || {})}`;
-              if (!seenCallKeys.has(callKey)) {
-                seenCallKeys.add(callKey);
-                rawFunctionCalls.push({
-                  id: fc.id,
-                  name: fc.name,
-                  args: fc.args || {},
-                });
+          if (chunk.candidates && chunk.candidates[0]?.content?.parts) {
+            for (const part of chunk.candidates[0].content.parts) {
+              if (part.thought) {
+                if (onThinking && part.text) {
+                  onThinking(part.text);
+                }
+              } else if (part.text) {
+                chunkText += part.text;
               }
             }
+          } else if (chunk.text) {
+            chunkText = chunk.text;
+          }
+
+          if (chunkText) {
+            iterationText += chunkText;
+            if (onChunk) {
+              onChunk(iterationText);
+            }
+          }
+
+          // Buffer function calls strictly without executing during stream chunks
+          const functionCalls = chunk.functionCalls;
+          if (functionCalls && Array.isArray(functionCalls)) {
+            for (const fc of functionCalls) {
+              if (fc.name) {
+                const callKey = `${fc.id || ""}:${fc.name}:${JSON.stringify(fc.args || {})}`;
+                if (!seenCallKeys.has(callKey)) {
+                  seenCallKeys.add(callKey);
+                  rawFunctionCalls.push({
+                    id: fc.id,
+                    name: fc.name,
+                    args: fc.args || {},
+                  });
+                }
+              }
+            }
           }
         }
+      } catch (streamErr: any) {
+        console.error(`[GeminiBrain] Streaming error on iteration ${iteration}:`, streamErr);
+        if (iteration === 1 && !iterationText && rawFunctionCalls.length === 0) {
+          throw new Error(formatGeminiError(streamErr));
+        }
       }
-    } catch (streamErr: any) {
-      console.error("[GeminiBrain] Streaming error mid-stream:", streamErr);
-      if (!accumulatedText && rawFunctionCalls.length === 0) {
-        throw new Error(formatGeminiError(streamErr));
+
+      if (iterationText.trim()) {
+        finalAccumulatedText = iterationText.trim();
       }
-    }
 
-    // Step 2: Handle completion or Tool Calling State Machine
-    if (rawFunctionCalls.length === 0) {
-      // Pure conversational turn (no function calls)
-      const finalText = accumulatedText.trim();
-      const modelTurn: BrainTurn = {
-        role: "model",
-        parts: [{ text: finalText }],
-      };
-      this.shortTermHistory.push(userTurn);
-      this.shortTermHistory.push(modelTurn);
-      return { responseText: finalText, toolCalls: [] };
-    }
-
-    // Map raw function calls to structured CompanionCommands
-    const commands: CompanionCommand[] = [];
-    for (const fc of rawFunctionCalls) {
-      const cmd = this.mapFunctionCallToCommand(fc.name, fc.args);
-      if (cmd) {
-        commands.push(cmd);
+      // If no function calls were emitted, the model has completed its thought process and spoken its answer
+      if (rawFunctionCalls.length === 0) {
+        break;
       }
-    }
 
-    // If no command executor provided, return the commands directly
-    if (!commandExecutor) {
-      const modelTurn: BrainTurn = {
+      // Map raw function calls to structured CompanionCommands
+      const iterationCommands: CompanionCommand[] = [];
+      for (const fc of rawFunctionCalls) {
+        const cmd = this.mapFunctionCallToCommand(fc.name, fc.args);
+        if (cmd) {
+          iterationCommands.push(cmd);
+          allExecutedCommands.push(cmd);
+        }
+      }
+
+      if (!commandExecutor) {
+        break;
+      }
+
+      // Execute tools post-stream and gather results
+      const toolResponses: BrainPart[] = [];
+      for (let i = 0; i < iterationCommands.length; i++) {
+        const cmd = iterationCommands[i];
+        const fc = rawFunctionCalls[i];
+        try {
+          const execResult = await commandExecutor(cmd);
+          toolResponses.push({
+            functionResponse: {
+              id: fc.id,
+              name: fc.name,
+              response: {
+                output: execResult.output,
+                success: execResult.success,
+              },
+            },
+          });
+        } catch (err: any) {
+          toolResponses.push({
+            functionResponse: {
+              id: fc.id,
+              name: fc.name,
+              response: {
+                error: err?.message || String(err),
+                success: false,
+              },
+            },
+          });
+        }
+      }
+
+      // Construct turns to feed back into model context
+      const modelCallTurn: BrainTurn = {
         role: "model",
         parts: [
-          ...(accumulatedText ? [{ text: accumulatedText }] : []),
+          ...(iterationText ? [{ text: iterationText }] : []),
           ...rawFunctionCalls.map((fc) => ({
             functionCall: { id: fc.id, name: fc.name, args: fc.args },
           })),
         ],
       };
-      this.shortTermHistory.push(userTurn);
-      this.shortTermHistory.push(modelTurn);
-      return { responseText: accumulatedText.trim(), toolCalls: commands };
-    }
 
-    // Step 3: Execute tools post-stream and build formal functionResponses
-    const toolResponses: BrainPart[] = [];
-    for (let i = 0; i < commands.length; i++) {
-      const cmd = commands[i];
-      const fc = rawFunctionCalls[i];
-      try {
-        const execResult = await commandExecutor(cmd);
-        toolResponses.push({
-          functionResponse: {
-            id: fc.id,
-            name: fc.name,
-            response: {
-              output: execResult.output,
-              success: execResult.success,
-            },
-          },
-        });
-      } catch (err: any) {
-        toolResponses.push({
-          functionResponse: {
-            id: fc.id,
-            name: fc.name,
-            response: {
-              error: err?.message || String(err),
-              success: false,
-            },
-          },
-        });
-      }
-    }
+      const toolResponseTurn: BrainTurn = {
+        role: "user",
+        parts: toolResponses,
+      };
 
-    // Step 4: Construct standard 3-step state machine turns:
-    // Turn A (Model): contains the functionCall(s) and plain text (without raw thought tokens)
-    const modelCallTurn: BrainTurn = {
-      role: "model",
-      parts: [
-        ...(accumulatedText ? [{ text: accumulatedText }] : []),
-        ...rawFunctionCalls.map((fc) => ({
-          functionCall: { id: fc.id, name: fc.name, args: fc.args },
-        })),
-      ],
-    };
+      currentConversation.push(modelCallTurn);
+      currentConversation.push(toolResponseTurn);
 
-    // Turn B (User/Tool): contains the corresponding functionResponse(s)
-    const toolResponseTurn: BrainTurn = {
-      role: "user",
-      parts: toolResponses,
-    };
-
-    // Step 5: Follow-up call to Gemini with the function results so the model
-    // can conclude naturally and speak the result in the bubble
-    const followUpContents = [...contents, modelCallTurn, toolResponseTurn];
-    let finalModelResponse = "";
-
-    try {
-      const followUpStream = await fetchStreamWithFallback(followUpContents);
-      for await (const chunk of followUpStream) {
-        let chunkText = "";
-
-        if (chunk.candidates && chunk.candidates[0]?.content?.parts) {
-          for (const part of chunk.candidates[0].content.parts) {
-            if (part.thought) {
-              if (onThinking && part.text) {
-                onThinking(part.text);
+      // If we reached the maximum number of iterations, execute one final non-tool pass to summarize the findings
+      if (iteration >= MAX_TOOL_ITERATIONS) {
+        try {
+          const finalStream = await fetchStreamWithFallback(currentConversation, false);
+          let summaryText = "";
+          for await (const chunk of finalStream) {
+            let chunkText = "";
+            if (chunk.candidates && chunk.candidates[0]?.content?.parts) {
+              for (const part of chunk.candidates[0].content.parts) {
+                if (part.text && !part.thought) {
+                  chunkText += part.text;
+                }
               }
-            } else if (part.text) {
-              chunkText += part.text;
+            } else if (chunk.text) {
+              chunkText = chunk.text;
+            }
+            if (chunkText) {
+              summaryText += chunkText;
+              if (onChunk) onChunk(summaryText);
             }
           }
-        } else if (chunk.text) {
-          chunkText = chunk.text;
-        }
-
-        if (chunkText) {
-          finalModelResponse += chunkText;
-          if (onChunk) {
-            onChunk(finalModelResponse);
+          if (summaryText.trim()) {
+            finalAccumulatedText = summaryText.trim();
           }
+        } catch (finalErr) {
+          console.warn("[GeminiBrain] Error in final summary stream:", finalErr);
         }
+        break;
       }
-    } catch (followUpErr) {
-      console.warn("[GeminiBrain] Follow-up completion error:", followUpErr);
     }
 
     const cleanedFinalResponse =
-      finalModelResponse.trim() ||
-      accumulatedText.trim() ||
-      (commands.some((c) => c.type === "open_url")
+      finalAccumulatedText.trim() ||
+      (allExecutedCommands.some((c) => c.type === "open_url")
         ? "Открыла ссылку! ✨"
         : "Готово! 🚀");
 
@@ -635,7 +638,7 @@ You control the user's desktop computer via tools.
     this.shortTermHistory.push(finalModelTurn);
     this.shortTermHistory = this.sanitizeHistory(this.shortTermHistory);
 
-    return { responseText: cleanedFinalResponse, toolCalls: commands };
+    return { responseText: cleanedFinalResponse, toolCalls: allExecutedCommands };
   }
 
   /**

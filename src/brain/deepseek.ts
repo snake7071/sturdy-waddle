@@ -218,7 +218,14 @@ You control the user's desktop computer via tools.
    When the user asks to open any website, video, music, or link (e.g. "открой ютуб", "open youtube", "найди в гугле"), call open_url with the full URL (e.g. 'https://www.youtube.com', 'https://github.com', 'https://google.com').
 5. HIDING COMPANION (hide_companion):
    When the user asks you to hide, minimize, or disappear from the screen (e.g. "скройся", "спрячься", "исчезни", "уйди", "скройся в трей", "закройся", "hide", "minimize"), acknowledge warmly and call \`hide_companion\`. The user can unhide you anytime via the system tray icon or hotkey.
-6. Call tools whenever relevant. After receiving the tool execution result, give a cute, cheerful 1-sentence confirmation.`;
+6. MULTI-STEP INVESTIGATION & OUTPUT EVALUATION (REACT LOOP):
+   Whenever you execute tools (e.g. searching for files with execute_shell, inspecting directories, running commands or diagnostics):
+   - You will receive the actual stdout, stderr, and success status of the command.
+   - CAREFULLY EVALUATE THE TOOL OUTPUT:
+     * If a command succeeded and returned what was requested, summarize and speak the answer in 1-2 sentences.
+     * If a command failed, returned an error, or returned empty output (for example, searching for a file in ~ produced no results): DO NOT GIVE UP IMMEDIATELY! Think about why, and call another tool to try alternative directories (e.g. ~/Downloads, ~/Documents), case-insensitive patterns (e.g. \`find ~ -iname "*pattern*"\`), or different commands.
+     * You can invoke multiple consecutive tool calls across turns until you reach the goal.
+     * However, if after trying multiple sensible attempts nothing is found or possible, politely explain in 1-2 sentences that you couldn't find or complete it.`;
   }
 
   /**
@@ -399,7 +406,7 @@ You control the user's desktop computer via tools.
     ];
 
     // Build fetch stream
-    const executeChatStream = async (reqMessages: DeepSeekMessage[]) => {
+    const executeChatStream = async (reqMessages: DeepSeekMessage[], allowTools: boolean = true) => {
       const payload: any = {
         model,
         messages: reqMessages.map((m) => {
@@ -412,7 +419,7 @@ You control the user's desktop computer via tools.
       };
 
       // Tools supported primarily on deepseek-chat
-      if (!isReasoner) {
+      if (!isReasoner && allowTools) {
         payload.tools = OPENAI_TOOLS;
         payload.temperature = 0.7;
       }
@@ -437,207 +444,213 @@ You control the user's desktop computer via tools.
       return response;
     };
 
-    let accumulatedText = "";
-    let accumulatedThoughts = "";
-    const rawToolCallsMap: Record<
-      number,
-      { id: string; type: "function"; function: { name: string; arguments: string } }
-    > = {};
-
-    let response: Response;
-    try {
-      response = await executeChatStream(messagesToSend);
-    } catch (err: any) {
-      console.error("[DeepSeekBrain] Request error:", err);
-      throw new Error(formatDeepSeekError(err));
-    }
-
-    const reader = response.body?.getReader();
-    if (!reader) throw new Error("No response body received from DeepSeek API.");
-
+    // Multi-turn Agentic ReAct Loop: allows model to evaluate tool outputs and try alternative attempts
+    const MAX_TOOL_ITERATIONS = 5;
+    let iteration = 0;
+    const allExecutedCommands: CompanionCommand[] = [];
+    const currentReqMessages: DeepSeekMessage[] = [...messagesToSend];
+    let finalResponseText = "";
     const decoder = new TextDecoder();
-    let buffer = "";
 
-    try {
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
+    while (iteration < MAX_TOOL_ITERATIONS) {
+      iteration++;
 
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || "";
+      let accumulatedText = "";
+      let accumulatedThoughts = "";
+      const rawToolCallsMap: Record<
+        number,
+        { id: string; type: "function"; function: { name: string; arguments: string } }
+      > = {};
 
-        for (const line of lines) {
-          const trimmed = line.trim();
-          if (!trimmed || trimmed.startsWith(":")) continue;
-          if (trimmed === "data: [DONE]") break;
-          if (trimmed.startsWith("data: ")) {
-            try {
-              const data = JSON.parse(trimmed.slice(6));
-              const choice = data.choices?.[0];
-              if (!choice) continue;
-
-              const delta = choice.delta;
-              if (delta) {
-                // Reasoning content for DeepSeek-R1
-                if (delta.reasoning_content) {
-                  accumulatedThoughts += delta.reasoning_content;
-                  if (onThinking) {
-                    onThinking(accumulatedThoughts);
-                  }
-                }
-
-                // Regular visible content
-                if (delta.content) {
-                  accumulatedText += delta.content;
-                  if (onChunk) {
-                    onChunk(accumulatedText);
-                  }
-                }
-
-                // Tool calls in stream
-                if (delta.tool_calls && Array.isArray(delta.tool_calls)) {
-                  for (const tc of delta.tool_calls) {
-                    const idx = tc.index ?? 0;
-                    if (!rawToolCallsMap[idx]) {
-                      rawToolCallsMap[idx] = {
-                        id: tc.id || `call_${Date.now()}_${idx}`,
-                        type: "function",
-                        function: {
-                          name: tc.function?.name || "",
-                          arguments: tc.function?.arguments || "",
-                        },
-                      };
-                    } else {
-                      if (tc.id) rawToolCallsMap[idx].id = tc.id;
-                      if (tc.function?.name) rawToolCallsMap[idx].function.name += tc.function.name;
-                      if (tc.function?.arguments)
-                        rawToolCallsMap[idx].function.arguments += tc.function.arguments;
-                    }
-                  }
-                }
-              }
-            } catch {
-              // ignore partial chunk json errors
-            }
-          }
-        }
-      }
-    } catch (streamErr: any) {
-      console.error("[DeepSeekBrain] Stream reading error:", streamErr);
-      if (!accumulatedText && Object.keys(rawToolCallsMap).length === 0) {
-        throw new Error(formatDeepSeekError(streamErr));
-      }
-    }
-
-    const toolCallsList = Object.values(rawToolCallsMap);
-
-    // If no tool calls were generated, pure conversational turn
-    if (toolCallsList.length === 0) {
-      const finalText = accumulatedText.trim();
-      this.shortTermHistory.push(userMessage);
-      this.shortTermHistory.push({ role: "assistant", content: finalText });
-      return { responseText: finalText, toolCalls: [] };
-    }
-
-    // Map tool calls to CompanionCommand
-    const commands: CompanionCommand[] = [];
-    for (const tc of toolCallsList) {
-      let argsObj: any = {};
+      let response: Response;
       try {
-        argsObj = JSON.parse(tc.function.arguments || "{}");
-      } catch {
-        console.warn("[DeepSeekBrain] Malformed tool arguments:", tc.function.arguments);
-      }
-      const cmd = this.mapFunctionCallToCommand(tc.function.name, argsObj);
-      if (cmd) {
-        commands.push(cmd);
-      }
-    }
-
-    if (!commandExecutor) {
-      this.shortTermHistory.push(userMessage);
-      this.shortTermHistory.push({
-        role: "assistant",
-        content: accumulatedText.trim() || null,
-        tool_calls: toolCallsList,
-      });
-      return { responseText: accumulatedText.trim(), toolCalls: commands };
-    }
-
-    // Execute tools and build tool responses
-    const assistantToolCallMessage: DeepSeekMessage = {
-      role: "assistant",
-      content: accumulatedText.trim() || null,
-      tool_calls: toolCallsList,
-    };
-
-    const toolResponseMessages: DeepSeekMessage[] = [];
-    for (let i = 0; i < commands.length; i++) {
-      const cmd = commands[i];
-      const tc = toolCallsList[i];
-      try {
-        const execRes = await commandExecutor(cmd);
-        toolResponseMessages.push({
-          role: "tool",
-          tool_call_id: tc.id,
-          content: JSON.stringify({ success: execRes.success, output: execRes.output }),
-        });
+        response = await executeChatStream(currentReqMessages, true);
       } catch (err: any) {
-        toolResponseMessages.push({
-          role: "tool",
-          tool_call_id: tc.id,
-          content: JSON.stringify({ success: false, error: err?.message || String(err) }),
-        });
+        console.error(`[DeepSeekBrain] Request error on iteration ${iteration}:`, err);
+        if (iteration === 1) {
+          throw new Error(formatDeepSeekError(err));
+        }
+        break;
       }
-    }
 
-    // Follow-up call so the model speaks the final friendly response
-    const followUpMessages: DeepSeekMessage[] = [
-      ...messagesToSend,
-      assistantToolCallMessage,
-      ...toolResponseMessages,
-    ];
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error("No response body received from DeepSeek API.");
 
-    let followUpText = "";
-    try {
-      const followUpResponse = await executeChatStream(followUpMessages);
-      const followUpReader = followUpResponse.body?.getReader();
-      if (followUpReader) {
-        let fBuffer = "";
+      let buffer = "";
+      try {
         while (true) {
-          const { done, value } = await followUpReader.read();
+          const { done, value } = await reader.read();
           if (done) break;
-          fBuffer += decoder.decode(value, { stream: true });
-          const fLines = fBuffer.split("\n");
-          fBuffer = fLines.pop() || "";
 
-          for (const line of fLines) {
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n");
+          buffer = lines.pop() || "";
+
+          for (const line of lines) {
             const trimmed = line.trim();
-            if (!trimmed || trimmed === "data: [DONE]") continue;
+            if (!trimmed || trimmed.startsWith(":")) continue;
+            if (trimmed === "data: [DONE]") break;
             if (trimmed.startsWith("data: ")) {
               try {
                 const data = JSON.parse(trimmed.slice(6));
-                const content = data.choices?.[0]?.delta?.content;
-                if (content) {
-                  followUpText += content;
-                  if (onChunk) {
-                    onChunk(followUpText);
+                const choice = data.choices?.[0];
+                if (!choice) continue;
+
+                const delta = choice.delta;
+                if (delta) {
+                  // Reasoning content for DeepSeek-R1
+                  if (delta.reasoning_content) {
+                    accumulatedThoughts += delta.reasoning_content;
+                    if (onThinking) {
+                      onThinking(accumulatedThoughts);
+                    }
+                  }
+
+                  // Regular visible content
+                  if (delta.content) {
+                    accumulatedText += delta.content;
+                    if (onChunk) {
+                      onChunk(accumulatedText);
+                    }
+                  }
+
+                  // Tool calls in stream
+                  if (delta.tool_calls && Array.isArray(delta.tool_calls)) {
+                    for (const tc of delta.tool_calls) {
+                      const idx = tc.index ?? 0;
+                      if (!rawToolCallsMap[idx]) {
+                        rawToolCallsMap[idx] = {
+                          id: tc.id || `call_${Date.now()}_${idx}`,
+                          type: "function",
+                          function: {
+                            name: tc.function?.name || "",
+                            arguments: tc.function?.arguments || "",
+                          },
+                        };
+                      } else {
+                        if (tc.id) rawToolCallsMap[idx].id = tc.id;
+                        if (tc.function?.name) rawToolCallsMap[idx].function.name += tc.function.name;
+                        if (tc.function?.arguments)
+                          rawToolCallsMap[idx].function.arguments += tc.function.arguments;
+                      }
+                    }
                   }
                 }
-              } catch {}
+              } catch {
+                // ignore partial chunk json errors
+              }
             }
           }
         }
+      } catch (streamErr: any) {
+        console.error(`[DeepSeekBrain] Stream reading error on iteration ${iteration}:`, streamErr);
+        if (iteration === 1 && !accumulatedText && Object.keys(rawToolCallsMap).length === 0) {
+          throw new Error(formatDeepSeekError(streamErr));
+        }
       }
-    } catch (fErr) {
-      console.warn("[DeepSeekBrain] Follow-up stream error:", fErr);
+
+      if (accumulatedText.trim()) {
+        finalResponseText = accumulatedText.trim();
+      }
+
+      const toolCallsList = Object.values(rawToolCallsMap);
+
+      // If no tool calls were generated, pure conversational turn
+      if (toolCallsList.length === 0) {
+        break;
+      }
+
+      // Map tool calls to CompanionCommand
+      const iterationCommands: CompanionCommand[] = [];
+      for (const tc of toolCallsList) {
+        let argsObj: any = {};
+        try {
+          argsObj = JSON.parse(tc.function.arguments || "{}");
+        } catch {
+          console.warn("[DeepSeekBrain] Malformed tool arguments:", tc.function.arguments);
+        }
+        const cmd = this.mapFunctionCallToCommand(tc.function.name, argsObj);
+        if (cmd) {
+          iterationCommands.push(cmd);
+          allExecutedCommands.push(cmd);
+        }
+      }
+
+      if (!commandExecutor) {
+        break;
+      }
+
+      // Execute tools and build tool responses
+      const assistantToolCallMessage: DeepSeekMessage = {
+        role: "assistant",
+        content: accumulatedText.trim() || null,
+        tool_calls: toolCallsList,
+      };
+
+      const toolResponseMessages: DeepSeekMessage[] = [];
+      for (let i = 0; i < iterationCommands.length; i++) {
+        const cmd = iterationCommands[i];
+        const tc = toolCallsList[i];
+        try {
+          const execRes = await commandExecutor(cmd);
+          toolResponseMessages.push({
+            role: "tool",
+            tool_call_id: tc.id,
+            content: JSON.stringify({ success: execRes.success, output: execRes.output }),
+          });
+        } catch (err: any) {
+          toolResponseMessages.push({
+            role: "tool",
+            tool_call_id: tc.id,
+            content: JSON.stringify({ success: false, error: err?.message || String(err) }),
+          });
+        }
+      }
+
+      currentReqMessages.push(assistantToolCallMessage);
+      currentReqMessages.push(...toolResponseMessages);
+
+      // If reached maximum iterations, execute one final non-tool pass to summarize the findings
+      if (iteration >= MAX_TOOL_ITERATIONS) {
+        try {
+          const finalResp = await executeChatStream(currentReqMessages, false);
+          const fReader = finalResp.body?.getReader();
+          if (fReader) {
+            let fBuf = "";
+            let summaryText = "";
+            while (true) {
+              const { done, value } = await fReader.read();
+              if (done) break;
+              fBuf += decoder.decode(value, { stream: true });
+              const fLines = fBuf.split("\n");
+              fBuf = fLines.pop() || "";
+              for (const line of fLines) {
+                const tr = line.trim();
+                if (!tr || tr === "data: [DONE]" || !tr.startsWith("data: ")) continue;
+                try {
+                  const d = JSON.parse(tr.slice(6));
+                  const cnt = d.choices?.[0]?.delta?.content;
+                  if (cnt) {
+                    summaryText += cnt;
+                    if (onChunk) onChunk(summaryText);
+                  }
+                } catch {}
+              }
+            }
+            if (summaryText.trim()) {
+              finalResponseText = summaryText.trim();
+            }
+          }
+        } catch (e) {
+          console.warn("[DeepSeekBrain] Error in final summary stream:", e);
+        }
+        break;
+      }
     }
 
     const finalResponse =
-      followUpText.trim() ||
-      accumulatedText.trim() ||
-      (commands.some((c) => c.type === "open_url")
+      finalResponseText.trim() ||
+      (allExecutedCommands.some((c) => c.type === "open_url")
         ? "Открыла ссылку! ✨"
         : "Готово! 🚀");
 
@@ -646,7 +659,7 @@ You control the user's desktop computer via tools.
     this.shortTermHistory.push({ role: "assistant", content: finalResponse });
     this.shortTermHistory = this.sanitizeHistory(this.shortTermHistory);
 
-    return { responseText: finalResponse, toolCalls: commands };
+    return { responseText: finalResponse, toolCalls: allExecutedCommands };
   }
 
   /**
