@@ -12,9 +12,10 @@ import { AvatarManager } from "./AvatarManager";
 
 interface MascotSpriteRendererProps {
   state: AvatarState;
+  scale?: number;
 }
 
-export const MascotSpriteRenderer: React.FC<MascotSpriteRendererProps> = ({ state }) => {
+export const MascotSpriteRenderer: React.FC<MascotSpriteRendererProps> = ({ state, scale = 1.0 }) => {
   const [manifest, setManifest] = useState<AvatarManifest>(() =>
     AvatarManager.getActiveAvatar()
   );
@@ -96,12 +97,12 @@ export const MascotSpriteRenderer: React.FC<MascotSpriteRendererProps> = ({ stat
   return (
     <div
       data-tauri-drag-region
-      className={`relative select-none pointer-events-auto flex items-center justify-center transition-transform duration-300 ${
+      className={`relative select-none pointer-events-auto flex items-center justify-center ${
         isCurrentGif ? "mascot-anim-gif" : animationClass
       }`}
       style={{
-        width: "256px",
-        height: "256px",
+        width: `${Math.round(256 * scale)}px`,
+        height: `${Math.round(256 * scale)}px`,
         cursor: "grab",
       }}
     >
@@ -110,7 +111,7 @@ export const MascotSpriteRenderer: React.FC<MascotSpriteRendererProps> = ({ stat
         alt={manifest.name}
         data-tauri-drag-region
         draggable={false}
-        className="w-full h-full object-contain pointer-events-auto select-none drop-shadow-2xl cursor-grab active:cursor-grabbing"
+        className="w-full h-full object-contain pointer-events-auto select-none cursor-grab active:cursor-grabbing"
         style={{
           imageRendering: "auto",
         }}
@@ -119,67 +120,72 @@ export const MascotSpriteRenderer: React.FC<MascotSpriteRendererProps> = ({ stat
       <style>{`
         @keyframes mascot-breathe {
           0%, 100% {
-            transform: translateY(0px) scale(1);
+            transform: translate3d(0, 0px, 0);
           }
           50% {
-            transform: translateY(-4px) scale(1.01);
+            transform: translate3d(0, -3px, 0);
           }
         }
 
         @keyframes mascot-shake {
-          0%, 100% { transform: translateX(0); }
-          20% { transform: translateX(-5px) rotate(-1.5deg); }
-          40% { transform: translateX(5px) rotate(1.5deg); }
-          60% { transform: translateX(-3px) rotate(-0.5deg); }
-          80% { transform: translateX(3px) rotate(0.5deg); }
+          0%, 100% { transform: translate3d(0, 0, 0); }
+          20% { transform: translate3d(-4px, 0, 0); }
+          40% { transform: translate3d(4px, 0, 0); }
+          60% { transform: translate3d(-2px, 0, 0); }
+          80% { transform: translate3d(2px, 0, 0); }
         }
 
         @keyframes mascot-question {
-          0%, 100% { transform: translateY(0) rotate(0deg); }
-          50% { transform: translateY(-3px) rotate(2deg); }
+          0%, 100% { transform: translate3d(0, 0, 0); }
+          50% { transform: translate3d(0, -3px, 0); }
         }
 
         @keyframes mascot-working {
-          0%, 100% { transform: translateY(0) scale(1); }
-          50% { transform: translateY(-2px) scale(0.995); }
+          0%, 100% { transform: translate3d(0, 0, 0); }
+          50% { transform: translate3d(0, -2px, 0); }
         }
 
         @keyframes mascot-glitch {
-          0% { transform: translate(0) }
-          20% { transform: translate(-3px, 3px) }
-          40% { transform: translate(-3px, -3px) }
-          60% { transform: translate(3px, 3px) }
-          80% { transform: translate(3px, -3px) }
-          100% { transform: translate(0) }
+          0% { transform: translate3d(0, 0, 0); }
+          25% { transform: translate3d(-2px, 2px, 0); }
+          50% { transform: translate3d(2px, -2px, 0); }
+          75% { transform: translate3d(-1px, 1px, 0); }
+          100% { transform: translate3d(0, 0, 0); }
         }
 
         .mascot-anim-breathe {
-          animation: mascot-breathe 3.5s ease-in-out infinite;
+          animation: mascot-breathe 4s ease-in-out infinite;
+          will-change: transform;
         }
 
         .mascot-anim-talking {
-          animation: mascot-breathe 2.6s ease-in-out infinite;
+          animation: mascot-breathe 2.5s ease-in-out infinite;
+          will-change: transform;
         }
 
         .mascot-anim-shake {
           animation: mascot-shake 0.4s ease-in-out 2;
+          will-change: transform;
         }
 
         .mascot-anim-question {
-          animation: mascot-question 2.4s ease-in-out infinite;
+          animation: mascot-question 3s ease-in-out infinite;
+          will-change: transform;
         }
 
         .mascot-anim-working {
-          animation: mascot-working 2.2s ease-in-out infinite;
+          animation: mascot-working 2.5s ease-in-out infinite;
+          will-change: transform;
         }
 
         .mascot-anim-glitch {
           animation: mascot-glitch 0.25s linear infinite;
+          will-change: transform;
         }
 
-        /* Subtle gentle breathing for GIFs so internal GIF animation remains crisp and natural */
+        /* GIFs handle their own internal frame playback smoothly */
         .mascot-anim-gif {
-          animation: mascot-breathe 4.5s ease-in-out infinite;
+          /* No external transform needed for GIFs to prevent double-invalidation */
         }
       `}</style>
     </div>

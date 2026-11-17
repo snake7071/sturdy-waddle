@@ -28,6 +28,10 @@ fn show_dashboard(app: tauri::AppHandle) {
         let _ = dashboard.show();
         let _ = dashboard.unminimize();
         let _ = dashboard.set_focus();
+        let _ = dashboard.set_size(tauri::Size::Logical(tauri::LogicalSize {
+            width: 1000.0,
+            height: 720.0,
+        }));
     } else {
         if let Ok(w) = tauri::WebviewWindowBuilder::new(
             &app,
@@ -36,6 +40,7 @@ fn show_dashboard(app: tauri::AppHandle) {
         )
         .title("Companion Dashboard")
         .inner_size(1000.0, 720.0)
+        .min_inner_size(650.0, 450.0)
         .resizable(true)
         .decorations(true)
         .build()
@@ -102,6 +107,95 @@ fn update_global_shortcuts(
         }
     }
     Ok(())
+}
+
+#[tauri::command]
+fn set_mascot_scale(app: tauri::AppHandle, scale: f64) -> Result<(), String> {
+    let clamped_scale = scale.clamp(0.5, 3.0);
+    let base_w = 380.0;
+    let base_h = 520.0;
+    let width = (base_w * clamped_scale).round();
+    let height = (base_h * clamped_scale).round();
+
+    if let Some(mascot) = app.get_webview_window("mascot") {
+        let _ = mascot.set_size(tauri::Size::Logical(tauri::LogicalSize { width, height }));
+    }
+
+    #[cfg(target_os = "linux")]
+    if std::env::var("HYPRLAND_INSTANCE_SIGNATURE").is_ok() {
+        let _ = std::process::Command::new("hyprctl")
+            .args([
+                "eval",
+                &format!(
+                    "return hl.dispatch(hl.dsp.window.resize({{ x = {}, y = {}, \"exact\" }}))",
+                    width as i32, height as i32
+                ),
+            ])
+            .output();
+    }
+
+    let _ = app.emit("mascot-scale-changed", clamped_scale);
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn ensure_hyprland_rules() {
+    if std::env::var("HYPRLAND_INSTANCE_SIGNATURE").is_err() {
+        return;
+    }
+    let home = match std::env::var("HOME") {
+        Ok(h) => std::path::PathBuf::from(h),
+        Err(_) => return,
+    };
+
+    let custom_rules_path = home.join(".config/hypr/custom/rules.lua");
+    let mut should_reload = false;
+
+    if custom_rules_path.parent().map(|p| p.exists()).unwrap_or(false) {
+        let existing = std::fs::read_to_string(&custom_rules_path).unwrap_or_default();
+        if !existing.contains("Companion Mascot") {
+            let companion_rules = r#"
+-- Companion Window Rules (Wayland / Hyprland)
+hl.window_rule({match = {class = "^(companion)$", title = "^(Companion Mascot)$" }, float = true})
+hl.window_rule({match = {class = "^(companion)$", title = "^(Companion Mascot)$" }, size = { 380, 520 }})
+hl.window_rule({match = {class = "^(companion)$", title = "^(Companion Mascot)$" }, pin = true})
+hl.window_rule({match = {class = "^(companion)$", title = "^(Companion Mascot)$" }, no_shadow = true})
+hl.window_rule({match = {class = "^(companion)$", title = "^(Companion Mascot)$" }, no_blur = true})
+
+hl.window_rule({match = {class = "^(companion)$", title = "^(Companion Dashboard)$" }, float = true})
+hl.window_rule({match = {class = "^(companion)$", title = "^(Companion Dashboard)$" }, size = { 1000, 720 }})
+hl.window_rule({match = {class = "^(companion)$", title = "^(Companion Dashboard)$" }, center = true})
+"#;
+            let new_content = format!("{}{}", existing, companion_rules);
+            if std::fs::write(&custom_rules_path, new_content).is_ok() {
+                should_reload = true;
+            }
+        }
+    } else {
+        let hyprland_conf = home.join(".config/hypr/hyprland.conf");
+        if hyprland_conf.exists() {
+            let existing = std::fs::read_to_string(&hyprland_conf).unwrap_or_default();
+            if !existing.contains("Companion Mascot") {
+                let companion_rules = r#"
+# Companion Window Rules (Wayland / Hyprland)
+windowrulev2 = float, class:^(companion)$, title:^(Companion Mascot)$
+windowrulev2 = size 380 520, class:^(companion)$, title:^(Companion Mascot)$
+windowrulev2 = pin, class:^(companion)$, title:^(Companion Mascot)$
+windowrulev2 = float, class:^(companion)$, title:^(Companion Dashboard)$
+windowrulev2 = size 1000 720, class:^(companion)$, title:^(Companion Dashboard)$
+windowrulev2 = center, class:^(companion)$, title:^(Companion Dashboard)$
+"#;
+                let new_content = format!("{}\n{}", existing, companion_rules);
+                if std::fs::write(&hyprland_conf, new_content).is_ok() {
+                    should_reload = true;
+                }
+            }
+        }
+    }
+
+    if should_reload {
+        let _ = std::process::Command::new("hyprctl").arg("reload").output();
+    }
 }
 
 #[tauri::command]
@@ -173,6 +267,16 @@ pub fn run() {
                 os_controller,
                 memory_store: memory_store.clone(),
             });
+
+            #[cfg(target_os = "linux")]
+            ensure_hyprland_rules();
+
+            if let Some(mascot) = app.get_webview_window("mascot") {
+                let _ = mascot.set_size(tauri::Size::Logical(tauri::LogicalSize {
+                    width: 320.0,
+                    height: 400.0,
+                }));
+            }
 
             // 4. Hook close request on dashboard window so it hides instead of destroying
             if let Some(dashboard) = app.get_webview_window("dashboard") {
@@ -291,6 +395,7 @@ pub fn run() {
             show_dashboard,
             hide_mascot,
             toggle_mascot,
+            set_mascot_scale,
             quit_app,
             update_global_shortcuts,
             open_devtools,

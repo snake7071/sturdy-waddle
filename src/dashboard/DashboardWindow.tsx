@@ -1,6 +1,7 @@
 /**
  * GNU General Public License v3.0
  * Dashboard Window Component (Settings, Avatars, Long-Term Memory Explorer & Husk Logs)
+ * Dark Smoked Glass SAO Aincrad HUD Aesthetic
  */
 
 import React, { useState, useEffect, useRef } from "react";
@@ -92,6 +93,28 @@ export const DashboardWindow: React.FC = () => {
   });
   const [recordingAction, setRecordingAction] = useState<string | null>(null);
 
+  // Mascot & Wayland Display Scaling State
+  const [mascotScale, setMascotScale] = useState<number>(() => {
+    try {
+      const saved = localStorage.getItem("companion_mascot_scale");
+      return saved ? Math.max(0.5, Math.min(3.0, parseFloat(saved))) : 1.0;
+    } catch {
+      return 1.0;
+    }
+  });
+
+  const handleScaleChange = async (newScale: number) => {
+    const clamped = Math.max(0.5, Math.min(3.0, Math.round(newScale * 100) / 100));
+    setMascotScale(clamped);
+    try {
+      localStorage.setItem("companion_mascot_scale", clamped.toString());
+      await invoke("set_mascot_scale", { scale: clamped });
+      await emit("mascot-scale-changed", clamped);
+    } catch (err) {
+      console.warn("Failed to update mascot scale:", err);
+    }
+  };
+
   // Memory Editor State
   const [memoryQuery, setMemoryQuery] = useState("");
   const [memories, setMemories] = useState<MemoryItem[]>([]);
@@ -154,7 +177,6 @@ export const DashboardWindow: React.FC = () => {
   const multiBatchInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
-    // 0. Fetch initial System Profile and App Index Context
     invoke<any>("get_system_context")
       .then((ctx) => {
         setSystemContext(ctx);
@@ -164,18 +186,15 @@ export const DashboardWindow: React.FC = () => {
       })
       .catch((err) => console.warn("Failed to load system context:", err));
 
-    // 0.1 Fetch initial SQLite Long-Term Memories
     invoke<MemoryItem[]>("get_all_memories")
       .then((items) => setMemories(items))
       .catch((err) => console.warn("Failed to load initial memories:", err));
 
-    // 1. Initial hydration from IndexedDB for large custom avatars
     AvatarManager.syncFromIndexedDB().then((list) => {
       setInstalledAvatars([...list]);
       setActiveAvatarId(AvatarManager.getActiveAvatarId());
     });
 
-    // 2. Listen for incoming Husk events
     const unlistenHusk = listen<any>("husk-event", (event) => {
       const log: HuskLog = {
         timestamp: new Date().toLocaleTimeString(),
@@ -187,7 +206,6 @@ export const DashboardWindow: React.FC = () => {
       setHuskLogs((prev) => [log, ...prev.slice(0, 49)]);
     });
 
-    // 3. Listen for Avatar changes from other windows/Tauri
     const unlistenAvatar = listen<AvatarManifest>("avatar-changed", (event) => {
       if (event.payload) {
         setActiveAvatarId(event.payload.id);
@@ -239,7 +257,7 @@ export const DashboardWindow: React.FC = () => {
             }
           : null
       );
-      setSyncStatus(`Индекс обновлен: ${summary.total_apps} приложений`);
+      setSyncStatus(`Индекс синхронизирован: ${summary.total_apps} программ`);
       setTimeout(() => setSyncStatus(""), 4000);
     } catch (err: any) {
       console.error("Index refresh failed:", err);
@@ -282,7 +300,6 @@ export const DashboardWindow: React.FC = () => {
       return;
     }
 
-    // Ignore standalone modifier presses
     if (["Control", "Shift", "Alt", "Meta"].includes(e.key)) {
       return;
     }
@@ -293,7 +310,6 @@ export const DashboardWindow: React.FC = () => {
     if (e.shiftKey) parts.push("Shift");
     if (e.metaKey) parts.push("Super");
 
-    // Format key name nicely
     let keyName = e.key;
     if (keyName === " ") keyName = "Space";
     else if (keyName.length === 1) keyName = keyName.toUpperCase();
@@ -319,15 +335,21 @@ export const DashboardWindow: React.FC = () => {
     localStorage.setItem("companion_user_name", userName);
     localStorage.setItem("companion_persona", persona);
     localStorage.setItem("companion_shortcuts", JSON.stringify(shortcuts));
+    localStorage.setItem("companion_mascot_scale", mascotScale.toString());
 
-    // Update global shortcuts in Rust
     try {
       await invoke("update_global_shortcuts", { shortcuts });
     } catch (err) {
       console.warn("Could not update global shortcuts:", err);
     }
 
-    // Broadcast update across Tauri windows to apply immediately
+    try {
+      await invoke("set_mascot_scale", { scale: mascotScale });
+      await emit("mascot-scale-changed", mascotScale);
+    } catch (err) {
+      console.warn("Could not update mascot scale:", err);
+    }
+
     try {
       await emit("ai-settings-changed", {
         provider,
@@ -345,7 +367,7 @@ export const DashboardWindow: React.FC = () => {
       window.dispatchEvent(new CustomEvent("ai-settings-changed", { detail: { provider } }));
     }
 
-    setSavedStatus("Настройки сохранены и применены.");
+    setSavedStatus("Параметры успешно сохранены в системный реестр.");
     setTimeout(() => setSavedStatus(""), 3500);
   };
 
@@ -374,7 +396,7 @@ export const DashboardWindow: React.FC = () => {
   const handleSaveNewMemory = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newMemoryKey.trim() || !newMemoryContent.trim()) {
-      setMemoryStatus("Пожалуйста, заполните ключ и содержание.");
+      setMemoryStatus("Заполните ключ и содержание.");
       setTimeout(() => setMemoryStatus(""), 3500);
       return;
     }
@@ -393,7 +415,7 @@ export const DashboardWindow: React.FC = () => {
       };
 
       await invoke("save_memory_entry", { item });
-      setMemoryStatus(`Знание "${item.key}" успешно сохранено в SQLite.`);
+      setMemoryStatus(`Запись "${item.key}" записана в SQLite.`);
       setNewMemoryKey("");
       setNewMemoryContent("");
       setNewMemoryTags("");
@@ -401,7 +423,7 @@ export const DashboardWindow: React.FC = () => {
       await loadAllMemories();
       setTimeout(() => setMemoryStatus(""), 3500);
     } catch (err: any) {
-      setMemoryStatus(`Ошибка сохранения: ${err?.message || err}`);
+      setMemoryStatus(`Ошибка записи: ${err?.message || err}`);
       setTimeout(() => setMemoryStatus(""), 4000);
     }
   };
@@ -443,7 +465,7 @@ export const DashboardWindow: React.FC = () => {
 
       await invoke("save_memory_entry", { item: updated });
       setEditingMemoryId(null);
-      setMemoryStatus(`Запись "${m.key}" успешно обновлена.`);
+      setMemoryStatus(`Запись "${m.key}" обновлена.`);
       await loadAllMemories();
       setTimeout(() => setMemoryStatus(""), 3500);
     } catch (err: any) {
@@ -452,13 +474,12 @@ export const DashboardWindow: React.FC = () => {
     }
   };
 
-  // Avatar skin switching
   const handleSelectAvatar = async (id: string) => {
     setErrorMessage("");
     await AvatarManager.setActiveAvatar(id);
     setActiveAvatarId(id);
     const selected = installedAvatars.find((a) => a.id === id);
-    setAvatarStatus(`Активирован скин "${selected?.name || id}"`);
+    setAvatarStatus(`Скин "${selected?.name || id}" экипирован.`);
     setTimeout(() => setAvatarStatus(""), 3500);
   };
 
@@ -469,12 +490,11 @@ export const DashboardWindow: React.FC = () => {
     if (success) {
       setInstalledAvatars([...AvatarManager.getInstalledAvatars()]);
       setActiveAvatarId(AvatarManager.getActiveAvatarId());
-      setAvatarStatus("Аватар удален.");
+      setAvatarStatus("Скин удален из инвентаря.");
       setTimeout(() => setAvatarStatus(""), 3000);
     }
   };
 
-  // Helper to read file to Data URL
   const readFileAsDataUrl = (file: File): Promise<string> => {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
@@ -484,7 +504,6 @@ export const DashboardWindow: React.FC = () => {
     });
   };
 
-  // Handle single image file upload
   const handleSingleImageFile = async (file: File) => {
     if (!file.type.startsWith("image/")) return;
     setErrorMessage("");
@@ -500,7 +519,6 @@ export const DashboardWindow: React.FC = () => {
     }
   };
 
-  // Handle multi-sprite slot file upload
   const handleMultiSlotFile = async (
     slot: "idle" | "talking" | "working" | "error",
     file: File
@@ -522,7 +540,6 @@ export const DashboardWindow: React.FC = () => {
     }
   };
 
-  // Handle multiple files dropped or selected at once
   const handleMultipleFiles = async (files: File[]) => {
     const imageFiles = files.filter((f) => f.type.startsWith("image/"));
     if (imageFiles.length === 0) return;
@@ -533,7 +550,7 @@ export const DashboardWindow: React.FC = () => {
         .replace(/\.[^/.]+$/, "")
         .replace(/[_-]?(idle|talking|talk|working|work|error|err)\b/gi, "")
         .trim();
-      setCustomAvatarName(baseName || "Мой Маскот");
+      setCustomAvatarName(baseName || "Custom Avatar");
     }
 
     const updated = { ...multiSprites };
@@ -589,7 +606,6 @@ export const DashboardWindow: React.FC = () => {
       }
     }
 
-    // Fill remaining empty slots with unassigned files in order
     if (!updated.idle && unassigned.length > 0) {
       updated.idle = unassigned.shift()!.dataUrl;
     }
@@ -604,22 +620,21 @@ export const DashboardWindow: React.FC = () => {
     }
 
     setMultiSprites(updated);
-    setAvatarStatus(`Загружено ${imageFiles.length} файл(ов)! Проверьте слоты ниже.`);
+    setAvatarStatus(`Импортировано ${imageFiles.length} файл(ов).`);
     setTimeout(() => setAvatarStatus(""), 4000);
   };
 
-  // Save custom avatar manifest with full IndexedDB persistence
   const handleSaveCustomAvatar = async () => {
     setErrorMessage("");
     setIsSaving(true);
 
     try {
-      const name = customAvatarName.trim() || "Мой Маскот";
+      const name = customAvatarName.trim() || "Custom Avatar";
       let manifest: AvatarManifest;
 
       if (uploadMode === "single") {
         if (!singleImageUrl) {
-          setErrorMessage("Пожалуйста, загрузите хотя бы одно изображение или GIF!");
+          setErrorMessage("Загрузите изображение или анимированный GIF.");
           setIsSaving(false);
           return;
         }
@@ -638,7 +653,7 @@ export const DashboardWindow: React.FC = () => {
         };
       } else {
         if (!multiSprites.idle) {
-          setErrorMessage("Пожалуйста, заполните слот Idle (Основной спрайт/GIF)!");
+          setErrorMessage("Слот Idle обязателен для экипировки.");
           setIsSaving(false);
           return;
         }
@@ -657,7 +672,6 @@ export const DashboardWindow: React.FC = () => {
         };
       }
 
-      // Save to IndexedDB and update active skin
       await AvatarManager.saveAvatar(manifest);
       await AvatarManager.setActiveAvatar(manifest.id);
 
@@ -665,126 +679,220 @@ export const DashboardWindow: React.FC = () => {
       setInstalledAvatars([...refreshed]);
       setActiveAvatarId(manifest.id);
 
-      setAvatarStatus(`Маскот "${manifest.name}" успешно установлен и активирован.`);
+      setAvatarStatus(`Скин "${manifest.name}" экипирован.`);
       setTimeout(() => setAvatarStatus(""), 5000);
 
-      // Reset upload form
       setCustomAvatarName("");
       setSingleImageUrl("");
       setMultiSprites({ idle: "", talking: "", working: "", error: "" });
     } catch (err: any) {
       console.error("[DashboardWindow] Save avatar error:", err);
-      setErrorMessage(`Ошибка сохранения: ${err?.message || err}`);
+      setErrorMessage(`Ошибка: ${err?.message || err}`);
     } finally {
       setIsSaving(false);
     }
   };
 
   return (
-    <div className="flex h-screen bg-slate-950 text-slate-100 font-sans select-none">
-      {/* Sidebar Navigation */}
-      <div className="w-56 bg-slate-900 border-r border-slate-800 p-4 flex flex-col justify-between">
+    <div className="flex h-screen bg-[#0E1015] text-neutral-200 font-sans select-none antialiased">
+      {/* =========================================================================
+          SAO Left Navigation Rail (Floating Circular Medallions & Active Ribbon)
+          ========================================================================= */}
+      <div className="w-20 lg:w-60 bg-[#12141A]/95 border-r border-white/10 p-3 lg:p-4 flex flex-col justify-between shrink-0">
         <div>
-          <div className="flex items-center gap-2 mb-6 px-2">
-            <div>
-              <h1 className="text-sm font-bold text-cyan-400">Companion Core</h1>
-              <p className="text-[10px] text-slate-400">GNU GPL-3.0 Architecture</p>
+          {/* App Header */}
+          <div className="flex items-center gap-3 mb-6 px-1">
+            <div className="w-10 h-10 rounded-full bg-[#181B24] border border-white/10 flex items-center justify-center text-[#EBA821] font-bold shrink-0 shadow-md">
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+              </svg>
+            </div>
+            <div className="hidden lg:block min-w-0">
+              <h1 className="text-xs font-mono font-bold tracking-wider text-neutral-100 uppercase">
+                COMPANION
+              </h1>
+              <p className="text-[10px] text-neutral-500 font-mono">SETTINGS & CONTROL</p>
             </div>
           </div>
 
-          <nav className="space-y-1">
-            <button
-              onClick={() => setActiveTab("settings")}
-              className={`w-full text-left px-3 py-2 rounded-lg text-xs font-medium transition-colors ${
-                activeTab === "settings"
-                  ? "bg-cyan-600/20 text-cyan-300 border border-cyan-500/30"
-                  : "text-slate-400 hover:bg-slate-800 hover:text-slate-200"
-              }`}
-            >
-              Settings & API Keys
-            </button>
-            <button
-              onClick={() => setActiveTab("avatars")}
-              className={`w-full text-left px-3 py-2 rounded-lg text-xs font-medium transition-colors ${
-                activeTab === "avatars"
-                  ? "bg-cyan-600/20 text-cyan-300 border border-cyan-500/30"
-                  : "text-slate-400 hover:bg-slate-800 hover:text-slate-200"
-              }`}
-            >
-              Avatars & Skins
-            </button>
-            <button
-              onClick={() => {
-                setActiveTab("memory");
-                loadAllMemories();
-              }}
-              className={`w-full text-left px-3 py-2 rounded-lg text-xs font-medium transition-colors ${
-                activeTab === "memory"
-                  ? "bg-cyan-600/20 text-cyan-300 border border-cyan-500/30"
-                  : "text-slate-400 hover:bg-slate-800 hover:text-slate-200"
-              }`}
-            >
-              Memory
-            </button>
-            <button
-              onClick={() => setActiveTab("husk")}
-              className={`w-full text-left px-3 py-2 rounded-lg text-xs font-medium transition-colors ${
-                activeTab === "husk"
-                  ? "bg-cyan-600/20 text-cyan-300 border border-cyan-500/30"
-                  : "text-slate-400 hover:bg-slate-800 hover:text-slate-200"
-              }`}
-            >
-              Husk Mode Terminal IPC
-            </button>
+          {/* Navigation Items */}
+          <nav className="space-y-2">
+            {[
+              {
+                id: "settings",
+                label: "AI Провайдеры",
+                sub: "Модели и ключи",
+                icon: (
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                ),
+              },
+              {
+                id: "avatars",
+                label: "Аватары и скины",
+                sub: "Выбор персонажа",
+                icon: (
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                ),
+              },
+              {
+                id: "memory",
+                label: "База памяти",
+                sub: "Сохраненный контекст",
+                icon: (
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4" />
+                ),
+              },
+              {
+                id: "husk",
+                label: "Husk IPC Терминал",
+                sub: "Локальный сокет",
+                icon: (
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                ),
+              },
+            ].map((tab) => {
+              const isActive = activeTab === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  onClick={() => {
+                    setActiveTab(tab.id as any);
+                    if (tab.id === "memory") loadAllMemories();
+                  }}
+                  className={`w-full flex items-center gap-3 p-1.5 rounded-lg transition-all duration-200 text-left ${
+                    isActive
+                      ? "bg-[#EBA821] text-[#12141A] shadow-md shadow-[#EBA821]/20 font-bold border-r-4 border-r-[#12141A]"
+                      : "text-neutral-400 hover:text-neutral-100 hover:bg-white/[0.04]"
+                  }`}
+                  title={tab.label}
+                >
+                  <div
+                    className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 transition-all ${
+                      isActive
+                        ? "bg-[#12141A] text-[#EBA821]"
+                        : "bg-[#181B24] text-neutral-300 border border-white/10"
+                    }`}
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      {tab.icon}
+                    </svg>
+                  </div>
+                  <div className="hidden lg:block min-w-0 pr-2">
+                    <div className="text-xs font-bold truncate">{tab.label}</div>
+                    <div
+                      className={`text-[10px] truncate ${
+                        isActive ? "text-[#12141A]/80 font-semibold" : "text-neutral-500 font-mono"
+                      }`}
+                    >
+                      {tab.sub}
+                    </div>
+                  </div>
+                </button>
+              );
+            })}
           </nav>
         </div>
 
-        <div className="text-[10px] text-slate-500 px-2">
-          Unix Socket: <code className="text-slate-400">/tmp/mascot-husk.sock</code>
+        {/* Sidebar Footer System Status */}
+        <div className="hidden lg:block bg-black/40 border border-white/5 rounded-lg p-2.5 text-[10px] font-mono text-neutral-400">
+          <div className="flex items-center gap-1.5 mb-1 text-neutral-300">
+            <span className="w-1.5 h-1.5 rounded-full bg-[#2E9E6B] animate-pulse" />
+            <span>SOCKET READY</span>
+          </div>
+          <div className="truncate text-neutral-500 text-[9px]">/tmp/mascot-husk.sock</div>
         </div>
       </div>
 
-      {/* Main Content Area */}
-      <div className="flex-1 p-6 overflow-y-auto">
-        {/* Settings Tab */}
-        {activeTab === "settings" && (
-          <div className="max-w-xl space-y-6">
-            <div>
-              <h2 className="text-lg font-bold text-slate-100">AI Brain & Provider Settings</h2>
-              <p className="text-xs text-slate-400">
-                Настройте активную нейросеть (Google Gemini или DeepSeek), ключи API и параметры диалога.
-              </p>
+      {/* =========================================================================
+          Unified Content Surface (Dark Smoked Obsidian Glass)
+          Clean 1px Hairline Dividers (divide-y divide-white/10)
+          ========================================================================= */}
+      <div className="flex-1 bg-[#12141A]/90 p-6 overflow-y-auto">
+        <div className="max-w-4xl mx-auto space-y-6">
+          {/* Status Header Bar */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-5 border-b border-white/10">
+            <div className="flex items-center gap-3">
+              <div>
+                <div className="flex items-center gap-2">
+                  <h2 className="text-sm font-bold tracking-wider font-mono uppercase text-neutral-100">
+                    Companion Dashboard
+                  </h2>
+                  <span className="text-[9px] font-mono px-2 py-0.5 rounded bg-emerald-500/10 text-[#2E9E6B] border border-emerald-500/20 font-bold">
+                    ONLINE
+                  </span>
+                </div>
+                <p className="text-[11px] text-neutral-400 font-mono mt-0.5">
+                  Пользователь: <span className="text-neutral-200">{userName}</span>
+                </p>
+              </div>
             </div>
 
-            <div className="space-y-4 bg-slate-900/60 p-4 rounded-xl border border-slate-800">
-              {/* Provider Switcher */}
-              <div>
-                <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-2">
-                  Активный AI Провайдер
-                </label>
-                <div className="grid grid-cols-2 gap-3">
+            {/* Gauges (AI Link & Memory) */}
+            <div className="flex items-center gap-4">
+              <div className="w-28 sm:w-36">
+                <div className="flex justify-between text-[10px] font-mono text-neutral-400 mb-1">
+                  <span>AI LINK</span>
+                  <span className={testResult?.success ? "text-[#2E9E6B]" : "text-neutral-400"}>
+                    {testResult?.success ? "CONNECTED" : "READY"}
+                  </span>
+                </div>
+                <div className="h-1.5 bg-white/10 rounded-full overflow-hidden">
+                  <div
+                    className={`h-full transition-all duration-300 ${
+                      testResult?.success ? "w-full bg-[#2E9E6B]" : "w-3/4 bg-[#EBA821]"
+                    }`}
+                  />
+                </div>
+              </div>
+
+              <div className="w-28 sm:w-36">
+                <div className="flex justify-between text-[10px] font-mono text-neutral-400 mb-1">
+                  <span>STORAGE</span>
+                  <span className="text-neutral-300">{memories.length} FACTS</span>
+                </div>
+                <div className="h-1.5 bg-white/10 rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-[#EBA821]/70"
+                    style={{ width: `${Math.min(100, Math.max(15, memories.length * 6))}%` }}
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* =========================================================================
+              Tab 1: Settings & AI Brain
+              ========================================================================= */}
+          {activeTab === "settings" && (
+            <div className="space-y-6">
+              {/* Flat Section 1: AI Provider Selector */}
+              <div className="space-y-3">
+                <div className="text-[11px] font-mono font-bold tracking-widest uppercase text-neutral-400">
+                  // NEURAL ENGINE SELECTION
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <button
                     type="button"
                     onClick={() => {
                       setProvider("gemini");
                       setTestResult(null);
                     }}
-                    className={`p-3 rounded-xl border text-left transition-all ${
+                    className={`p-3.5 rounded-lg border text-left transition-all ${
                       provider === "gemini"
-                        ? "bg-cyan-950/40 border-cyan-400 ring-2 ring-cyan-500/30 text-white shadow-lg shadow-cyan-500/10"
-                        : "bg-slate-950/40 border-slate-800 text-slate-400 hover:border-slate-700 hover:text-slate-200"
+                        ? "bg-white/[0.06] border-white/20 border-l-4 border-l-[#EBA821] text-neutral-100"
+                        : "bg-black/20 border-white/5 hover:border-white/10 text-neutral-400"
                     }`}
                   >
                     <div className="flex items-center justify-between mb-1">
-                      <span className="text-xs font-mono font-bold text-cyan-400">GEMINI</span>
+                      <span className="text-xs font-mono font-bold text-neutral-200">GOOGLE GEMINI</span>
                       {provider === "gemini" && (
-                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 border border-cyan-500/40">
-                          Активен
+                        <span className="text-[9px] font-bold px-2 py-0.5 rounded bg-[#EBA821] text-[#12141A]">
+                          ACTIVE
                         </span>
                       )}
                     </div>
-                    <div className="font-bold text-xs">Google Gemini</div>
-                    <div className="text-[10px] text-slate-400 mt-0.5">
+                    <div className="text-[11px] text-neutral-400">
                       Gemini 3.5 Flash, 3.8 Flash, 3.1 Flash-Lite
                     </div>
                   </button>
@@ -795,599 +903,493 @@ export const DashboardWindow: React.FC = () => {
                       setProvider("deepseek");
                       setTestResult(null);
                     }}
-                    className={`p-3 rounded-xl border text-left transition-all ${
+                    className={`p-3.5 rounded-lg border text-left transition-all ${
                       provider === "deepseek"
-                        ? "bg-blue-950/40 border-blue-400 ring-2 ring-blue-500/30 text-white shadow-lg shadow-blue-500/10"
-                        : "bg-slate-950/40 border-slate-800 text-slate-400 hover:border-slate-700 hover:text-slate-200"
+                        ? "bg-white/[0.06] border-white/20 border-l-4 border-l-[#EBA821] text-neutral-100"
+                        : "bg-black/20 border-white/5 hover:border-white/10 text-neutral-400"
                     }`}
                   >
                     <div className="flex items-center justify-between mb-1">
-                      <span className="text-xs font-mono font-bold text-blue-400">DEEPSEEK</span>
+                      <span className="text-xs font-mono font-bold text-neutral-200">DEEPSEEK AI</span>
                       {provider === "deepseek" && (
-                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-300 border border-blue-500/40">
-                          Активен
+                        <span className="text-[9px] font-bold px-2 py-0.5 rounded bg-[#EBA821] text-[#12141A]">
+                          ACTIVE
                         </span>
                       )}
                     </div>
-                    <div className="font-bold text-xs">DeepSeek AI</div>
-                    <div className="text-[10px] text-slate-400 mt-0.5">
+                    <div className="text-[11px] text-neutral-400">
                       DeepSeek-V3 (Chat) & DeepSeek-R1 (Reasoner)
                     </div>
                   </button>
                 </div>
               </div>
 
-              {/* Google Gemini Configuration */}
-              {provider === "gemini" && (
-                <div className="space-y-4 pt-1">
-                  <div>
-                    <div className="flex items-center justify-between mb-1">
-                      <label className="text-xs font-medium text-slate-300">
-                        Google Gemini API Key
-                      </label>
-                      <button
-                        type="button"
-                        onClick={() => handleOpenUrl("https://aistudio.google.com/app/apikey")}
-                        className="text-[10px] text-cyan-400 hover:text-cyan-300 underline"
-                      >
-                        Получить ключ в Google AI Studio ↗
-                      </button>
+              {/* Flat Section 2: Neural Credentials (divide-y divide-white/10) */}
+              <div className="divide-y divide-white/10 border-t border-b border-white/10 py-1">
+                {/* Gemini Fields */}
+                {provider === "gemini" && (
+                  <>
+                    <div className="py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <div className="sm:w-1/3">
+                        <label className="text-xs font-semibold text-neutral-200 block">API Key</label>
+                        <button
+                          type="button"
+                          onClick={() => handleOpenUrl("https://aistudio.google.com/app/apikey")}
+                          className="text-[10px] text-neutral-400 hover:text-neutral-200 underline mt-0.5"
+                        >
+                          Google AI Studio ↗
+                        </button>
+                      </div>
+                      <div className="sm:w-2/3 relative">
+                        <input
+                          type={showGeminiKey ? "text" : "password"}
+                          value={geminiApiKey}
+                          onChange={(e) => setGeminiApiKey(e.target.value)}
+                          placeholder="AIzaSy..."
+                          className="w-full bg-black/30 border border-white/10 focus:border-white/30 text-xs text-neutral-100 px-3 py-2 pr-14 rounded-lg font-mono outline-none"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowGeminiKey(!showGeminiKey)}
+                          className="absolute right-2 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-neutral-200 text-[10px] px-1.5 py-0.5 rounded bg-white/5"
+                        >
+                          {showGeminiKey ? "HIDE" : "SHOW"}
+                        </button>
+                      </div>
                     </div>
-                    <div className="relative">
-                      <input
-                        type={showGeminiKey ? "text" : "password"}
-                        value={geminiApiKey}
-                        onChange={(e) => setGeminiApiKey(e.target.value)}
-                        placeholder="AIzaSy..."
-                        className="w-full bg-slate-800 text-xs text-white px-3 py-2 pr-10 rounded-lg border border-slate-700 focus:border-cyan-400 outline-none font-mono"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowGeminiKey(!showGeminiKey)}
-                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200 text-[10px] px-1 py-0.5 rounded border border-slate-700"
-                        title={showGeminiKey ? "Скрыть ключ" : "Показать ключ"}
-                      >
-                        {showGeminiKey ? "Скрыть" : "Показать"}
-                      </button>
-                    </div>
-                    <p className="text-[10px] text-slate-500 mt-1">
-                      Ключ хранится строго локально на вашем устройстве.
-                    </p>
-                  </div>
 
-                  <div>
-                    <label className="block text-xs font-medium text-slate-300 mb-1">
-                      Модель Google Gemini
-                    </label>
-                    <select
-                      value={geminiModelName}
-                      onChange={(e) => setGeminiModelName(e.target.value)}
-                      className="w-full bg-slate-800 text-xs text-white px-3 py-2 rounded-lg border border-slate-700 focus:border-cyan-400 outline-none font-mono"
+                    <div className="py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <div className="sm:w-1/3">
+                        <label className="text-xs font-semibold text-neutral-200 block">Model Engine</label>
+                        <span className="text-[10px] text-neutral-500">Рекомендуется 3.5 Flash</span>
+                      </div>
+                      <div className="sm:w-2/3">
+                        <select
+                          value={geminiModelName}
+                          onChange={(e) => setGeminiModelName(e.target.value)}
+                          className="w-full bg-black/40 border border-white/10 text-xs text-neutral-200 px-3 py-2 rounded-lg font-mono outline-none"
+                        >
+                          <option value="gemini-3.5-flash">gemini-3.5-flash (Smart CoT + Speed ~1.2s)</option>
+                          <option value="gemini-3.8-flash">gemini-3.8-flash (Latest Model)</option>
+                          <option value="gemini-3.1-flash-lite">gemini-3.1-flash-lite (Ultra-fast ~400ms)</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <div className="py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <div className="sm:w-1/3">
+                        <label className="text-xs font-semibold text-neutral-200 block">Thinking Budget</label>
+                        <span className="text-[10px] text-neutral-500">Глубина рассуждений CoT</span>
+                      </div>
+                      <div className="sm:w-2/3 grid grid-cols-3 gap-2">
+                        {[
+                          { val: 0, label: "0 (Fast)" },
+                          { val: 1024, label: "1024 (Smart)" },
+                          { val: 2048, label: "2048 (Deep)" },
+                        ].map((b) => (
+                          <button
+                            key={b.val}
+                            type="button"
+                            onClick={() => setGeminiThinkingBudget(b.val)}
+                            className={`py-1.5 px-2 rounded-lg text-xs font-mono transition-colors border ${
+                              geminiThinkingBudget === b.val
+                                ? "bg-[#EBA821] text-[#12141A] font-bold border-transparent"
+                                : "bg-black/20 text-neutral-400 border-white/10 hover:text-white"
+                            }`}
+                          >
+                            {b.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </>
+                )}
+
+                {/* DeepSeek Fields */}
+                {provider === "deepseek" && (
+                  <>
+                    <div className="py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <div className="sm:w-1/3">
+                        <label className="text-xs font-semibold text-neutral-200 block">DeepSeek API Key</label>
+                        <button
+                          type="button"
+                          onClick={() => handleOpenUrl("https://platform.deepseek.com/api_keys")}
+                          className="text-[10px] text-neutral-400 hover:text-neutral-200 underline mt-0.5"
+                        >
+                          platform.deepseek.com ↗
+                        </button>
+                      </div>
+                      <div className="sm:w-2/3 relative">
+                        <input
+                          type={showDeepseekKey ? "text" : "password"}
+                          value={deepseekApiKey}
+                          onChange={(e) => setDeepseekApiKey(e.target.value)}
+                          placeholder="sk-..."
+                          className="w-full bg-black/30 border border-white/10 focus:border-white/30 text-xs text-neutral-100 px-3 py-2 pr-14 rounded-lg font-mono outline-none"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowDeepseekKey(!showDeepseekKey)}
+                          className="absolute right-2 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-neutral-200 text-[10px] px-1.5 py-0.5 rounded bg-white/5"
+                        >
+                          {showDeepseekKey ? "HIDE" : "SHOW"}
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <div className="sm:w-1/3">
+                        <label className="text-xs font-semibold text-neutral-200 block">DeepSeek Model</label>
+                        <span className="text-[10px] text-neutral-500">Chat vs Reasoner</span>
+                      </div>
+                      <div className="sm:w-2/3">
+                        <select
+                          value={deepseekModelName}
+                          onChange={(e) => setDeepseekModelName(e.target.value)}
+                          className="w-full bg-black/40 border border-white/10 text-xs text-neutral-200 px-3 py-2 rounded-lg font-mono outline-none"
+                        >
+                          <option value="deepseek-chat">deepseek-chat (DeepSeek-V3: Tools & OS Commands)</option>
+                          <option value="deepseek-reasoner">deepseek-reasoner (DeepSeek-R1: Deep Reasoner)</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <div className="py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <div className="sm:w-1/3">
+                        <label className="text-xs font-semibold text-neutral-200 block">API Base URL</label>
+                      </div>
+                      <div className="sm:w-2/3">
+                        <input
+                          type="text"
+                          value={deepseekBaseUrl}
+                          onChange={(e) => setDeepseekBaseUrl(e.target.value)}
+                          placeholder="https://api.deepseek.com"
+                          className="w-full bg-black/30 border border-white/10 text-xs text-neutral-100 px-3 py-2 rounded-lg font-mono outline-none"
+                        />
+                      </div>
+                    </div>
+                  </>
+                )}
+
+                {/* Connection Ping Row */}
+                <div className="py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="sm:w-1/3">
+                    <label className="text-xs font-semibold text-neutral-200 block">Connection Health</label>
+                    <span className="text-[10px] text-neutral-500">Проверка эндпоинта</span>
+                  </div>
+                  <div className="sm:w-2/3 flex items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={handleTestConnection}
+                      disabled={isTesting}
+                      className="bg-white/10 hover:bg-white/15 disabled:opacity-50 text-neutral-200 text-xs px-4 py-2 rounded-lg font-mono font-semibold transition-colors"
                     >
-                      <option value="gemini-3.5-flash">gemini-3.5-flash (Умный CoT + Скорость ~1.2s, Рекомендуется)</option>
-                      <option value="gemini-3.8-flash">gemini-3.8-flash (Новейшая модель 3.8)</option>
-                      <option value="gemini-3.1-flash-lite">gemini-3.1-flash-lite (Ультра-быстрый режим ~400ms)</option>
-                    </select>
-                    <p className="text-[10px] text-slate-500 mt-1">
-                      Рекомендуется <code className="text-cyan-400">gemini-3.5-flash</code> для глубокого понимания контекста и надежного вызова инструментов.
-                    </p>
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-medium text-slate-300 mb-1">
-                      Режим размышлений (Thinking Budget)
-                    </label>
-                    <div className="grid grid-cols-3 gap-2 text-xs">
-                      <button
-                        type="button"
-                        onClick={() => setGeminiThinkingBudget(0)}
-                        className={`py-2 px-2.5 rounded-lg border text-left transition-all ${
-                          geminiThinkingBudget === 0
-                            ? "bg-slate-800 border-cyan-400 text-cyan-300 shadow-sm"
-                            : "bg-slate-950/40 border-slate-700/60 text-slate-400 hover:border-slate-600"
+                      {isTesting ? "PINGING..." : "PING AI SERVER"}
+                    </button>
+                    {testResult && (
+                      <span
+                        className={`text-xs font-mono font-semibold ${
+                          testResult.success ? "text-[#2E9E6B]" : "text-[#D94848]"
                         }`}
                       >
-                        <div className="font-bold text-[11px]">
-                          Выключен
-                        </div>
-                        <div className="text-[10px] text-slate-500 mt-0.5">0 токенов (мгновенно)</div>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => setGeminiThinkingBudget(1024)}
-                        className={`py-2 px-2.5 rounded-lg border text-left transition-all ${
-                          geminiThinkingBudget === 1024
-                            ? "bg-slate-800 border-cyan-400 text-cyan-300 shadow-sm"
-                            : "bg-slate-950/40 border-slate-700/60 text-slate-400 hover:border-slate-600"
-                        }`}
-                      >
-                        <div className="font-bold text-[11px]">
-                          Умный
-                        </div>
-                        <div className="text-[10px] text-slate-500 mt-0.5">~1024 токена CoT</div>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => setGeminiThinkingBudget(2048)}
-                        className={`py-2 px-2.5 rounded-lg border text-left transition-all ${
-                          geminiThinkingBudget === 2048
-                            ? "bg-slate-800 border-cyan-400 text-cyan-300 shadow-sm"
-                            : "bg-slate-950/40 border-slate-700/60 text-slate-400 hover:border-slate-600"
-                        }`}
-                      >
-                        <div className="font-bold text-[11px]">
-                          Глубокий
-                        </div>
-                        <div className="text-[10px] text-slate-500 mt-0.5">~2048 токенов CoT</div>
-                      </button>
-                    </div>
+                        {testResult.success ? "[ONLINE OK]" : `[FAIL: ${testResult.message}]`}
+                      </span>
+                    )}
                   </div>
                 </div>
-              )}
 
-              {/* DeepSeek Configuration */}
-              {provider === "deepseek" && (
-                <div className="space-y-4 pt-1">
-                  <div>
-                    <div className="flex items-center justify-between mb-1">
-                      <label className="text-xs font-medium text-slate-300">
-                        DeepSeek API Key
-                      </label>
-                      <button
-                        type="button"
-                        onClick={() => handleOpenUrl("https://platform.deepseek.com/api_keys")}
-                        className="text-[10px] text-blue-400 hover:text-blue-300 underline"
-                      >
-                        Получить ключ на platform.deepseek.com ↗
-                      </button>
-                    </div>
-                    <div className="relative">
-                      <input
-                        type={showDeepseekKey ? "text" : "password"}
-                        value={deepseekApiKey}
-                        onChange={(e) => setDeepseekApiKey(e.target.value)}
-                        placeholder="sk-..."
-                        className="w-full bg-slate-800 text-xs text-white px-3 py-2 pr-10 rounded-lg border border-slate-700 focus:border-blue-400 outline-none font-mono"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowDeepseekKey(!showDeepseekKey)}
-                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200 text-[10px] px-1 py-0.5 rounded border border-slate-700"
-                        title={showDeepseekKey ? "Скрыть ключ" : "Показать ключ"}
-                      >
-                        {showDeepseekKey ? "Скрыть" : "Показать"}
-                      </button>
-                    </div>
-                    <p className="text-[10px] text-slate-500 mt-1">
-                      Прямое подключение к официальному API DeepSeek без прокси-серверов.
-                    </p>
+                {/* User Name Row */}
+                <div className="py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="sm:w-1/3">
+                    <label className="text-xs font-semibold text-neutral-200 block">User Handle</label>
+                    <span className="text-[10px] text-neutral-500">Обращение к пользователю</span>
                   </div>
-
-                  <div>
-                    <label className="block text-xs font-medium text-slate-300 mb-1">
-                      Модель DeepSeek
-                    </label>
-                    <select
-                      value={deepseekModelName}
-                      onChange={(e) => setDeepseekModelName(e.target.value)}
-                      className="w-full bg-slate-800 text-xs text-white px-3 py-2 rounded-lg border border-slate-700 focus:border-blue-400 outline-none font-mono"
-                    >
-                      <option value="deepseek-chat">deepseek-chat (DeepSeek-V3: Высокая скорость, вызов тулов и управление приложениями)</option>
-                      <option value="deepseek-reasoner">deepseek-reasoner (DeepSeek-R1: Продвинутые рассуждения CoT, решение сложных задач)</option>
-                    </select>
-                    <p className="text-[10px] text-slate-500 mt-1">
-                      Для запуска программ и терминальных команд используйте <code className="text-blue-400">deepseek-chat</code>.
-                    </p>
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-medium text-slate-300 mb-1">
-                      API Base URL
-                    </label>
+                  <div className="sm:w-2/3">
                     <input
                       type="text"
-                      value={deepseekBaseUrl}
-                      onChange={(e) => setDeepseekBaseUrl(e.target.value)}
-                      placeholder="https://api.deepseek.com"
-                      className="w-full bg-slate-800 text-xs text-white px-3 py-2 rounded-lg border border-slate-700 focus:border-blue-400 outline-none font-mono"
+                      value={userName}
+                      onChange={(e) => setUserName(e.target.value)}
+                      placeholder="Developer"
+                      className="w-full bg-black/30 border border-white/10 text-xs text-neutral-100 px-3 py-2 rounded-lg font-mono outline-none"
                     />
-                    <p className="text-[10px] text-slate-500 mt-1">
-                      Стандартный эндпоинт: <code className="text-slate-400">https://api.deepseek.com</code>
-                    </p>
                   </div>
                 </div>
-              )}
-
-              {/* Connection Test & Instant Visual Status */}
-              <div className="pt-2 border-t border-slate-800/80">
-                <div className="flex flex-col sm:flex-row sm:items-center gap-3">
-                  <button
-                    type="button"
-                    onClick={handleTestConnection}
-                    disabled={isTesting}
-                    className="flex items-center justify-center gap-1.5 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-slate-200 text-xs px-3.5 py-2 rounded-lg border border-slate-700 transition-colors font-medium whitespace-nowrap"
-                  >
-                    {isTesting ? (
-                      <>
-                        <span className="inline-block w-3 h-3 border-2 border-cyan-400 border-t-transparent rounded-full animate-spin" />
-                        <span>Проверка связи...</span>
-                      </>
-                    ) : (
-                      <span>Проверить подключение (Ping)</span>
-                    )}
-                  </button>
-
-                  {testResult && (
-                    <div
-                      className={`text-xs px-3 py-2 rounded-lg border flex items-center gap-2 animate-in fade-in flex-1 ${
-                        testResult.success
-                          ? "bg-emerald-950/60 border-emerald-500/50 text-emerald-300"
-                          : "bg-red-950/60 border-red-500/50 text-red-300"
-                      }`}
-                    >
-                      <span className="text-xs font-mono font-bold">{testResult.success ? "[OK]" : "[FAIL]"}</span>
-                      <span className="leading-snug">{testResult.message}</span>
-                    </div>
-                  )}
-                </div>
               </div>
 
-              <div>
-                <label className="block text-xs font-medium text-slate-300 mb-1">
-                  Имя пользователя (Никнейм)
-                </label>
-                <input
-                  type="text"
-                  value={userName}
-                  onChange={(e) => setUserName(e.target.value)}
-                  placeholder="Developer"
-                  className="w-full bg-slate-800 text-xs text-white px-3 py-2 rounded-lg border border-slate-700 focus:border-cyan-400 outline-none font-mono"
-                />
-              </div>
-
-              <div className="flex items-center justify-between pt-3 border-t border-slate-800/80">
-                <button
-                  onClick={handleSaveSettings}
-                  className="bg-cyan-600 hover:bg-cyan-500 text-white text-xs px-4 py-2 rounded-lg font-medium transition-colors shadow-lg shadow-cyan-600/20"
-                >
-                  Сохранить и применить
-                </button>
-                {savedStatus && (
-                  <span className="text-xs text-emerald-400 animate-in fade-in font-medium">{savedStatus}</span>
-                )}
-              </div>
-            </div>
-
-            {/* Companion Personality Card */}
-            <div className="space-y-4 bg-slate-900/60 p-4 rounded-xl border border-slate-800">
-              <div className="flex items-center justify-between border-b border-slate-800 pb-2">
-                <div>
-                  <h3 className="text-xs font-bold text-slate-200">Изначальный характер компаньона</h3>
-                  <p className="text-[10px] text-slate-400">
-                    Настройте базовый стиль, тон и характер. Если оставить поле пустым — характер будет чистым, и личность будет строиться исключительно на воспоминаниях.
-                  </p>
-                </div>
-                {persona.trim() === "" ? (
-                  <span className="text-[10px] bg-slate-800 text-slate-400 border border-slate-700 px-2 py-0.5 rounded-full font-mono">
-                    Чистый характер
-                  </span>
-                ) : (
-                  <span className="text-[10px] bg-cyan-950/80 text-cyan-300 border border-cyan-800/60 px-2.5 py-0.5 rounded-full font-mono">
-                    Задан пользователем
-                  </span>
-                )}
-              </div>
-
-              <div>
-                <textarea
-                  value={persona}
-                  onChange={(e) => setPersona(e.target.value)}
-                  placeholder="Оставьте поле пустым, чтобы компаньон опирался исключительно на память, либо задайте уникальный характер (роль, манеру общения, особенности)..."
-                  rows={4}
-                  className="w-full bg-slate-800 text-xs text-white p-3 rounded-lg border border-slate-700 focus:border-cyan-400 outline-none font-sans leading-relaxed resize-none"
-                />
-                <div className="flex items-center justify-between mt-2">
-                  <p className="text-[10px] text-slate-500">
-                    {persona.trim() === ""
-                      ? "Личность компаньона строится исключительно на вашей памяти и фактах из SQLite."
-                      : "Компаньон будет следовать этому характеру во всех ответах."}
-                  </p>
+              {/* Flat Section 3: Companion Persona */}
+              <div className="space-y-3 pt-2">
+                <div className="flex items-center justify-between">
+                  <div className="text-[11px] font-mono font-bold tracking-widest uppercase text-neutral-400">
+                    // COMPANION SOUL & PERSONA
+                  </div>
                   <div className="flex gap-2">
                     {persona.trim() !== "" && (
                       <button
                         type="button"
                         onClick={() => setPersona("")}
-                        className="text-[11px] text-slate-400 hover:text-red-400 border border-slate-700 hover:border-red-500/50 px-2.5 py-1 rounded transition-colors"
+                        className="text-[10px] text-neutral-500 hover:text-neutral-300 transition-colors"
                       >
-                        Очистить (без характера)
+                        Очистить
                       </button>
                     )}
                     <button
                       type="button"
                       onClick={() => setPersona(DEFAULT_PERSONA)}
-                      className="text-[11px] text-slate-400 hover:text-cyan-300 border border-slate-700 hover:border-cyan-500/50 px-2.5 py-1 rounded transition-colors"
+                      className="text-[10px] text-neutral-400 hover:text-white transition-colors"
                     >
-                      Сбросить по умолчанию
+                      По умолчанию
                     </button>
                   </div>
                 </div>
+
+                <textarea
+                  value={persona}
+                  onChange={(e) => setPersona(e.target.value)}
+                  placeholder="Задайте характер компаньона или оставьте пустым..."
+                  rows={3}
+                  className="w-full bg-black/30 border border-white/10 focus:border-white/30 text-xs text-neutral-200 p-3 rounded-lg leading-relaxed outline-none resize-none font-sans"
+                />
               </div>
 
-              <div className="flex items-center justify-between pt-2 border-t border-slate-800/80">
-                <button
-                  type="button"
-                  onClick={handleSaveSettings}
-                  className="bg-cyan-600 hover:bg-cyan-500 text-white text-xs px-4 py-1.5 rounded-lg font-medium transition-colors shadow-lg shadow-cyan-600/20"
-                >
-                  Применить характер
-                </button>
-                {savedStatus && (
-                  <span className="text-xs text-emerald-400 font-medium">{savedStatus}</span>
-                )}
-              </div>
-            </div>
-
-            {/* Global Hotkeys Card */}
-            <div className="space-y-4 bg-slate-900/60 p-4 rounded-xl border border-slate-800">
-              <div className="flex items-center justify-between border-b border-slate-800 pb-2">
-                <div>
-                  <h3 className="text-xs font-bold text-slate-200">Горячие клавиши (Global Hotkeys)</h3>
-                  <p className="text-[10px] text-slate-400">
-                    Системные комбинации клавиш для быстрого скрытия, вызова и закрытия компаньона
-                  </p>
+              {/* Flat Section 4: Hotkeys */}
+              <div className="space-y-3 pt-2">
+                <div className="flex items-center justify-between">
+                  <div className="text-[11px] font-mono font-bold tracking-widest uppercase text-neutral-400">
+                    // SYSTEM HOTKEYS
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShortcuts({ ...DEFAULT_SHORTCUTS })}
+                    className="text-[10px] text-neutral-400 hover:text-white transition-colors"
+                  >
+                    Сбросить
+                  </button>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setShortcuts({ ...DEFAULT_SHORTCUTS })}
-                  className="text-[10px] text-slate-400 hover:text-cyan-300 transition-colors"
-                >
-                  Сбросить все клавиши
-                </button>
-              </div>
 
-              <div className="space-y-2.5">
-                {[
-                  {
-                    id: "toggle_mascot",
-                    label: "Показать / скрыть ассистента",
-                    desc: "Быстро свернуть компаньона в трей или показать на экране",
-                  },
-                  {
-                    id: "toggle_history",
-                    label: "Показать / скрыть историю диалога",
-                    desc: "Открыть или свернуть панель с историей всех сообщений и ответов",
-                  },
-                  {
-                    id: "open_settings",
-                    label: "Открыть окно настроек",
-                    desc: "Развернуть панель управления Companion Dashboard",
-                  },
-                  {
-                    id: "quit_app",
-                    label: "Закрыть приложение",
-                    desc: "Полностью завершить работу ассистента и выйти",
-                  },
-                ].map((item) => {
-                  const isRecording = recordingAction === item.id;
-                  const currentShortcut = shortcuts[item.id] || "";
-
-                  return (
-                    <div
-                      key={item.id}
-                      className="flex items-center justify-between bg-slate-950/50 p-2.5 rounded-lg border border-slate-800/80 gap-3"
-                    >
-                      <div>
-                        <div className="text-xs font-medium text-slate-200">{item.label}</div>
-                        <div className="text-[10px] text-slate-400">{item.desc}</div>
-                      </div>
-
-                      <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() => setRecordingAction(isRecording ? null : item.id)}
-                          onKeyDown={(e) => isRecording && handleKeyRecord(e, item.id)}
-                          className={`px-3 py-1.5 rounded-lg text-xs font-mono border transition-all ${
-                            isRecording
-                              ? "bg-amber-500/20 border-amber-400 text-amber-200 animate-pulse ring-2 ring-amber-500/30"
-                              : "bg-slate-800 border-slate-700 text-cyan-300 hover:border-slate-600"
-                          }`}
-                          title="Нажмите для записи новой комбинации клавиш"
-                        >
-                          {isRecording ? "Нажмите клавиши... (Esc)" : currentShortcut || "Не назначено"}
-                        </button>
-                        {currentShortcut && (
+                <div className="divide-y divide-white/10 border-t border-b border-white/10">
+                  {[
+                    { id: "toggle_mascot", label: "Показать / скрыть маскота" },
+                    { id: "toggle_history", label: "Показать / скрыть историю" },
+                    { id: "open_settings", label: "Открыть системное меню" },
+                    { id: "quit_app", label: "Завершить работу приложения" },
+                  ].map((item) => {
+                    const isRecording = recordingAction === item.id;
+                    const combo = shortcuts[item.id] || "";
+                    return (
+                      <div key={item.id} className="py-2.5 flex items-center justify-between gap-3">
+                        <span className="text-xs text-neutral-300">{item.label}</span>
+                        <div className="flex items-center gap-2">
                           <button
                             type="button"
-                            onClick={() =>
-                              setShortcuts((prev) => ({
-                                ...prev,
-                                [item.id]: "",
-                              }))
-                            }
-                            className="text-slate-500 hover:text-red-400 text-xs px-1"
-                            title="Снять клавишу"
+                            onClick={() => setRecordingAction(isRecording ? null : item.id)}
+                            onKeyDown={(e) => isRecording && handleKeyRecord(e, item.id)}
+                            className={`px-3 py-1 rounded text-xs font-mono transition-all border ${
+                              isRecording
+                                ? "bg-[#EBA821] text-[#12141A] font-bold animate-pulse border-transparent"
+                                : "bg-black/30 border-white/10 text-neutral-300 hover:text-white"
+                            }`}
                           >
-                            ✕
+                            {isRecording ? "Press Keys..." : combo || "None"}
                           </button>
-                        )}
+                          {combo && (
+                            <button
+                              type="button"
+                              onClick={() => setShortcuts((prev) => ({ ...prev, [item.id]: "" }))}
+                              className="text-neutral-500 hover:text-[#D94848] text-xs px-1"
+                            >
+                              ✕
+                            </button>
+                          )}
+                        </div>
                       </div>
-                    </div>
-                  );
-                })}
+                    );
+                  })}
+                </div>
               </div>
 
-              <div className="flex items-center justify-between pt-2 border-t border-slate-800/80">
+              {/* Flat Section 5: Wayland / HiDPI Scaling */}
+              <div className="space-y-3 pt-2">
+                <div className="flex items-center justify-between">
+                  <div className="text-[11px] font-mono font-bold tracking-widest uppercase text-neutral-400">
+                    // WAYLAND / HIDPI MASCOT SCALING
+                  </div>
+                  <span className="text-xs font-mono text-neutral-200">
+                    {Math.round(mascotScale * 100)}% ({Math.round(320 * mascotScale)}×{Math.round(400 * mascotScale)}px)
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-5 gap-2">
+                  {[
+                    { label: "75%", scale: 0.75 },
+                    { label: "100%", scale: 1.0 },
+                    { label: "120%", scale: 1.2 },
+                    { label: "150%", scale: 1.5 },
+                    { label: "200%", scale: 2.0 },
+                  ].map((p) => {
+                    const isActive = Math.abs(mascotScale - p.scale) < 0.01;
+                    return (
+                      <button
+                        key={p.scale}
+                        type="button"
+                        onClick={() => handleScaleChange(p.scale)}
+                        className={`py-1.5 rounded text-xs font-mono transition-colors border ${
+                          isActive
+                            ? "bg-[#EBA821] text-[#12141A] font-bold border-transparent"
+                            : "bg-black/20 border-white/10 text-neutral-400 hover:text-white"
+                        }`}
+                      >
+                        {p.label}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <input
+                  type="range"
+                  min="0.5"
+                  max="2.5"
+                  step="0.05"
+                  value={mascotScale}
+                  onChange={(e) => handleScaleChange(parseFloat(e.target.value))}
+                  className="w-full accent-[#EBA821] cursor-pointer mt-1"
+                />
+              </div>
+
+              {/* Flat Section 6: System Profile & App Indexer */}
+              <div className="space-y-3 pt-2">
+                <div className="flex items-center justify-between">
+                  <div className="text-[11px] font-mono font-bold tracking-widest uppercase text-neutral-400">
+                    // SYSTEM CONTEXT & XDG APP INDEXER
+                  </div>
+                  {systemContext && (
+                    <span className="text-[10px] font-mono text-neutral-400">
+                      {systemContext.total_apps} APPS INDEXED
+                    </span>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs font-mono">
+                  <div className="bg-black/20 border border-white/5 rounded-lg p-2.5">
+                    <span className="text-[10px] text-neutral-500 block mb-0.5">OS PLATFORM</span>
+                    <span className="text-neutral-200 truncate block">
+                      {systemContext?.profile.os_name || "Linux"}
+                    </span>
+                  </div>
+                  <div className="bg-black/20 border border-white/5 rounded-lg p-2.5">
+                    <span className="text-[10px] text-neutral-500 block mb-0.5">SESSION / DE</span>
+                    <span className="text-neutral-200 truncate block">
+                      {systemContext?.profile.session_type || "Wayland"} ({systemContext?.profile.desktop_env || "Hyprland"})
+                    </span>
+                  </div>
+                  <div className="bg-black/20 border border-white/5 rounded-lg p-2.5">
+                    <span className="text-[10px] text-neutral-500 block mb-0.5">OPERATOR</span>
+                    <span className="text-neutral-200 truncate block">
+                      {systemContext?.profile.user_name || userName}
+                    </span>
+                  </div>
+                  <div className="bg-black/20 border border-white/5 rounded-lg p-2.5">
+                    <span className="text-[10px] text-neutral-500 block mb-0.5">DEFAULT SHELL</span>
+                    <span className="text-neutral-200 truncate block">
+                      {systemContext?.profile.default_shell || "sh"}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between pt-1">
+                  <span className="text-[10px] text-neutral-500 font-mono">
+                    {systemContext?.last_updated ? `Updated: ${systemContext.last_updated}` : "Index active"}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={handleRefreshSystemIndex}
+                    disabled={isSyncingIndex}
+                    className="bg-white/10 hover:bg-white/15 disabled:opacity-50 text-neutral-300 text-xs px-3 py-1.5 rounded font-mono transition-colors"
+                  >
+                    {isSyncingIndex ? "SCANNING..." : "REFRESH APP INDEX"}
+                  </button>
+                </div>
+
+                {syncStatus && (
+                  <div className="text-[10px] font-mono text-[#2E9E6B] bg-emerald-500/10 border border-emerald-500/20 p-2 rounded text-center">
+                    {syncStatus}
+                  </div>
+                )}
+              </div>
+
+              {/* Bottom Sticky Action Bar */}
+              <div className="pt-4 flex items-center justify-between border-t border-white/10">
                 <button
                   type="button"
                   onClick={handleSaveSettings}
-                  className="bg-cyan-600 hover:bg-cyan-500 text-white text-xs px-4 py-1.5 rounded-lg font-medium transition-colors shadow-lg shadow-cyan-600/20"
+                  className="bg-[#EBA821] hover:bg-[#d89619] text-[#12141A] font-bold text-xs px-6 py-2.5 rounded-lg shadow-lg shadow-[#EBA821]/20 active:scale-95 transition-all"
                 >
-                  Применить горячие клавиши
+                  SAVE & APPLY CHANGES
                 </button>
                 {savedStatus && (
-                  <span className="text-xs text-emerald-400 font-medium">{savedStatus}</span>
+                  <span className="text-xs font-mono text-[#2E9E6B] font-semibold animate-in fade-in">
+                    {savedStatus}
+                  </span>
                 )}
               </div>
             </div>
+          )}
 
-            {/* System Profile & App Index Card */}
-            <div className="space-y-4 bg-slate-900/60 p-4 rounded-xl border border-slate-800">
-              <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+          {/* =========================================================================
+              Tab 2: Avatars & Equipment
+              ========================================================================= */}
+          {activeTab === "avatars" && (
+            <div className="space-y-6">
+              <div className="flex items-center justify-between">
                 <div>
-                  <h3 className="text-xs font-bold text-slate-200">Системный профиль и Индекс приложений</h3>
-                  <p className="text-[10px] text-slate-400">
-                    Автоматическое распознавание окружения и динамический поиск софта по XDG-стандартам
+                  <h3 className="text-xs font-mono font-bold tracking-widest uppercase text-neutral-400">
+                    // EQUIPMENT & SKINS INVENTORY
+                  </h3>
+                  <p className="text-xs text-neutral-400 mt-0.5">
+                    Выберите экипированный скин ассистента или загрузите новый спрайт-пак.
                   </p>
                 </div>
-                {systemContext && (
-                  <span className="text-[11px] bg-cyan-950/80 text-cyan-300 border border-cyan-800/60 px-2.5 py-0.5 rounded-full font-mono">
-                    {systemContext.total_apps} приложений
-                  </span>
+                {avatarStatus && (
+                  <span className="text-xs font-mono text-[#2E9E6B] font-semibold">{avatarStatus}</span>
+                )}
+                {errorMessage && (
+                  <span className="text-xs font-mono text-[#D94848] font-semibold">{errorMessage}</span>
                 )}
               </div>
 
-              <div className="grid grid-cols-2 gap-3 text-xs">
-                <div className="bg-slate-950/50 p-2.5 rounded-lg border border-slate-800/80">
-                  <span className="text-[10px] text-slate-400 block mb-0.5">Операционная система:</span>
-                  <span className="font-semibold text-slate-200 font-mono">
-                    {systemContext?.profile.os_name || "Linux"} {systemContext?.profile.os_version || ""}
-                  </span>
-                </div>
-
-                <div className="bg-slate-950/50 p-2.5 rounded-lg border border-slate-800/80">
-                  <span className="text-[10px] text-slate-400 block mb-0.5">Графика и Сессия:</span>
-                  <span className="font-semibold text-cyan-300 font-mono">
-                    {systemContext?.profile.session_type || "Wayland"} ({systemContext?.profile.desktop_env || "Default"})
-                  </span>
-                </div>
-
-                <div className="bg-slate-950/50 p-2.5 rounded-lg border border-slate-800/80">
-                  <span className="text-[10px] text-slate-400 block mb-0.5">Пользователь:</span>
-                  <span className="font-semibold text-slate-200 font-mono">
-                    {systemContext?.profile.user_name || userName}
-                  </span>
-                </div>
-
-                <div className="bg-slate-950/50 p-2.5 rounded-lg border border-slate-800/80">
-                  <span className="text-[10px] text-slate-400 block mb-0.5">Командный шелл:</span>
-                  <span className="font-semibold text-purple-300 font-mono">
-                    {systemContext?.profile.default_shell || "sh"}
-                  </span>
-                </div>
-              </div>
-
-              <div className="flex items-center justify-between pt-2 border-t border-slate-800/60">
-                <span className="text-[10px] text-slate-500 font-mono">
-                  {systemContext?.last_updated
-                    ? `Синхронизировано: ${systemContext.last_updated}`
-                    : "Индекс готов к использованию"}
-                </span>
-
-                <button
-                  onClick={handleRefreshSystemIndex}
-                  disabled={isSyncingIndex}
-                  className="flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-cyan-300 text-xs px-3 py-1.5 rounded-lg border border-cyan-800/40 transition-colors font-medium"
-                >
-                  {isSyncingIndex ? (
-                    <>
-                      <span className="inline-block w-3 h-3 border-2 border-cyan-400 border-t-transparent rounded-full animate-spin" />
-                      <span>Сканирую диск...</span>
-                    </>
-                  ) : (
-                    <>
-                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                      </svg>
-                      <span>Обновить индекс приложений</span>
-                    </>
-                  )}
-                </button>
-              </div>
-
-              {syncStatus && (
-                <div className="text-[11px] text-cyan-300 bg-cyan-950/60 border border-cyan-800/50 p-2 rounded-lg text-center animate-in fade-in">
-                  {syncStatus}
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* Avatars Tab */}
-        {activeTab === "avatars" && (
-          <div className="max-w-4xl space-y-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <h2 className="text-lg font-bold text-slate-100">Avatar & Skin Manager</h2>
-                <p className="text-xs text-slate-400">
-                  Switch companion skins in real time or upload custom animated GIFs / sprites.
-                </p>
-              </div>
-              {avatarStatus && (
-                <div className="text-xs text-emerald-300 bg-emerald-950/70 border border-emerald-500/50 px-3 py-1.5 rounded-lg animate-in fade-in">
-                  {avatarStatus}
-                </div>
-              )}
-              {errorMessage && (
-                <div className="text-xs text-red-300 bg-red-950/70 border border-red-500/50 px-3 py-1.5 rounded-lg animate-in fade-in">
-                  {errorMessage}
-                </div>
-              )}
-            </div>
-
-            {/* Installed Avatars Grid */}
-            <div>
-              <div className="flex items-center justify-between mb-3">
-                <h3 className="text-xs font-bold text-slate-300 uppercase tracking-wider">
-                  Installed Avatars ({installedAvatars.length})
-                </h3>
-                <span className="text-[11px] text-slate-500">
-                  Click any card to immediately switch
-                </span>
-              </div>
-
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
+              {/* Equipment Grid */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                 {installedAvatars.map((avatar) => {
                   const isActive = avatar.id === activeAvatarId;
                   const isDefault =
-                    avatar.id === DEFAULT_AVATAR_ID ||
-                    avatar.id === "default-anime-companion";
+                    avatar.id === DEFAULT_AVATAR_ID || avatar.id === "default-anime-companion";
 
                   return (
                     <div
                       key={avatar.id}
                       onClick={() => handleSelectAvatar(avatar.id)}
-                      className={`relative group rounded-xl p-3 border transition-all cursor-pointer flex flex-col justify-between ${
+                      className={`relative group rounded-lg p-3 border transition-all cursor-pointer flex flex-col justify-between ${
                         isActive
-                          ? "bg-cyan-950/30 border-cyan-400 ring-2 ring-cyan-500/40 shadow-lg shadow-cyan-500/10"
-                          : "bg-slate-900/60 border-slate-800 hover:border-slate-700 hover:bg-slate-900"
+                          ? "bg-white/[0.08] border-white/20 border-l-4 border-l-[#EBA821]"
+                          : "bg-black/20 border-white/5 hover:border-white/15 hover:bg-white/[0.03]"
                       }`}
                     >
-                      {/* Top Badges */}
-                      <div className="flex items-center justify-between gap-1 mb-2">
-                        <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700/60">
-                          {avatar.type}
-                        </span>
-
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-[9px] font-mono text-neutral-500 uppercase">{avatar.type}</span>
                         {isActive ? (
-                          <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 animate-pulse">
-                            ✓ Active
+                          <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-[#EBA821] text-[#12141A]">
+                            EQUIPPED
                           </span>
                         ) : !isDefault ? (
                           <button
                             onClick={(e) => handleDeleteAvatar(e, avatar.id)}
-                            className="text-[9px] text-slate-500 hover:text-red-400 px-1.5 py-0.5 rounded hover:bg-red-500/10 transition-colors"
-                            title="Delete avatar"
+                            className="text-[9px] text-neutral-500 hover:text-[#D94848]"
                           >
                             ✕
                           </button>
                         ) : null}
                       </div>
 
-                      {/* Avatar Preview (plays animated GIF) */}
-                      <div className="w-full h-32 rounded-lg bg-slate-950/70 border border-slate-800/80 flex items-center justify-center p-2 mb-2 overflow-hidden group-hover:scale-[1.02] transition-transform">
+                      <div className="w-full h-28 bg-black/40 border border-white/5 rounded flex items-center justify-center p-2 mb-2 overflow-hidden">
                         <img
                           src={avatar.preview || avatar.sprites.idle}
                           alt={avatar.name}
@@ -1395,92 +1397,55 @@ export const DashboardWindow: React.FC = () => {
                         />
                       </div>
 
-                      {/* Avatar Details */}
-                      <div>
-                        <h4 className="text-xs font-semibold text-slate-200 truncate" title={avatar.name}>
-                          {avatar.name}
-                        </h4>
-                        <div className="flex items-center justify-between mt-1 text-[10px] text-slate-500">
-                          <span>
-                            {Object.keys(avatar.sprites || {}).length} states
-                          </span>
-                          {isActive && <span className="text-cyan-400 font-mono">Current</span>}
-                        </div>
-                      </div>
+                      <div className="truncate text-xs font-bold text-neutral-200">{avatar.name}</div>
                     </div>
                   );
                 })}
               </div>
-            </div>
 
-            {/* Upload Custom Avatar Section */}
-            <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-5 space-y-4">
-              <div>
-                <h3 className="text-sm font-bold text-slate-200">Upload Custom Avatar</h3>
-                <p className="text-xs text-slate-400">
-                  Import animated GIFs or images. Stored persistently via local IndexedDB storage.
-                </p>
-              </div>
+              {/* Custom Upload Section */}
+              <div className="border-t border-white/10 pt-4 space-y-4">
+                <div className="text-[11px] font-mono font-bold tracking-widest uppercase text-neutral-400">
+                  // IMPORT CUSTOM AVATAR SPRITES
+                </div>
 
-              {/* Mode Toggle: Single Image vs Multi-Sprite */}
-              <div className="flex gap-2 border-b border-slate-800 pb-3">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setUploadMode("multi");
-                    setErrorMessage("");
-                  }}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-                    uploadMode === "multi"
-                      ? "bg-cyan-600/20 text-cyan-300 border border-cyan-500/40"
-                      : "text-slate-400 hover:bg-slate-800 hover:text-slate-200"
-                  }`}
-                >
-                  Multi-Sprite / 4 GIFs (Idle, Talking, Error, Working)
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setUploadMode("single");
-                    setErrorMessage("");
-                  }}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-                    uploadMode === "single"
-                      ? "bg-cyan-600/20 text-cyan-300 border border-cyan-500/40"
-                      : "text-slate-400 hover:bg-slate-800 hover:text-slate-200"
-                  }`}
-                >
-                  Single GIF / Image (Quick Import)
-                </button>
-              </div>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setUploadMode("multi")}
+                    className={`px-3 py-1.5 rounded text-xs font-mono border transition-colors ${
+                      uploadMode === "multi"
+                        ? "bg-[#EBA821] text-[#12141A] font-bold border-transparent"
+                        : "bg-black/20 text-neutral-400 border-white/10 hover:text-white"
+                    }`}
+                  >
+                    4-Sprite Set (Idle, Talk, Error, Work)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setUploadMode("single")}
+                    className={`px-3 py-1.5 rounded text-xs font-mono border transition-colors ${
+                      uploadMode === "single"
+                        ? "bg-[#EBA821] text-[#12141A] font-bold border-transparent"
+                        : "bg-black/20 text-neutral-400 border-white/10 hover:text-white"
+                    }`}
+                  >
+                    Single GIF / Image
+                  </button>
+                </div>
 
-              {/* Name Input */}
-              <div>
-                <label className="block text-xs font-medium text-slate-300 mb-1">
-                  Avatar Name
-                </label>
                 <input
                   type="text"
                   value={customAvatarName}
                   onChange={(e) => setCustomAvatarName(e.target.value)}
-                  placeholder="e.g. Cyber Neko, Pixel Hero..."
-                  className="w-full bg-slate-800 text-xs text-white px-3 py-2 rounded-lg border border-slate-700 focus:border-cyan-400 outline-none font-mono"
+                  placeholder="Avatar Name (e.g. Asuna, Neko)..."
+                  className="w-full bg-black/30 border border-white/10 text-xs text-neutral-100 px-3 py-2 rounded-lg font-mono outline-none"
                 />
-              </div>
 
-              {/* Single Image Upload */}
-              {uploadMode === "single" && (
-                <div className="space-y-3">
+                {uploadMode === "single" ? (
                   <div
-                    onDragOver={(e) => e.preventDefault()}
-                    onDrop={async (e) => {
-                      e.preventDefault();
-                      if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-                        await handleSingleImageFile(e.dataTransfer.files[0]);
-                      }
-                    }}
                     onClick={() => singleFileInputRef.current?.click()}
-                    className="border-2 border-dashed border-slate-700 hover:border-cyan-500/60 rounded-xl p-6 text-center cursor-pointer transition-colors bg-slate-950/40 flex flex-col items-center justify-center gap-2"
+                    className="border-2 border-dashed border-white/15 hover:border-white/30 rounded-lg p-6 text-center cursor-pointer bg-black/20 transition-colors"
                   >
                     <input
                       ref={singleFileInputRef}
@@ -1493,787 +1458,338 @@ export const DashboardWindow: React.FC = () => {
                         }
                       }}
                     />
-
                     {singleImageUrl ? (
                       <div className="flex flex-col items-center gap-2">
-                        <img
-                          src={singleImageUrl}
-                          alt="Uploaded avatar"
-                          className="w-24 h-24 object-contain rounded-lg border border-cyan-500/50 p-1 bg-slate-900"
-                        />
-                        <span className="text-xs text-cyan-400 font-medium">
-                          Image loaded! Click or drop another image to replace.
-                        </span>
+                        <img src={singleImageUrl} alt="preview" className="w-20 h-20 object-contain" />
+                        <span className="text-xs text-[#EBA821] font-mono">Image loaded! Click to replace.</span>
                       </div>
                     ) : (
-                      <>
-                        <svg className="w-8 h-8 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                        </svg>
-                        <div className="text-xs text-slate-300 font-medium">
-                          Drag & drop GIF / image here, or <span className="text-cyan-400">browse</span>
-                        </div>
-                        <p className="text-[10px] text-slate-500">
-                          Supports animated GIF, PNG, SVG, JPG, WebP.
-                        </p>
-                      </>
+                      <div className="text-xs text-neutral-400">
+                        Drop GIF or image here, or <span className="text-neutral-200 underline">browse</span>
+                      </div>
                     )}
                   </div>
-                </div>
-              )}
-
-              {/* Multi-Sprite Upload Slots */}
-              {uploadMode === "multi" && (
-                <div className="space-y-3">
-                  {/* Batch Upload Dropzone */}
-                  <div
-                    onDragOver={(e) => e.preventDefault()}
-                    onDrop={async (e) => {
-                      e.preventDefault();
-                      if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-                        await handleMultipleFiles(Array.from(e.dataTransfer.files));
-                      }
-                    }}
-                    onClick={() => multiBatchInputRef.current?.click()}
-                    className="border-2 border-dashed border-cyan-500/50 hover:border-cyan-400 bg-cyan-950/20 hover:bg-cyan-950/30 rounded-xl p-4 text-center cursor-pointer transition-colors flex flex-col items-center justify-center gap-1.5"
-                  >
-                    <input
-                      ref={multiBatchInputRef}
-                      type="file"
-                      multiple
-                      accept="image/*,.gif"
-                      className="hidden"
-                      onChange={async (e) => {
-                        if (e.target.files && e.target.files.length > 0) {
-                          await handleMultipleFiles(Array.from(e.target.files));
-                        }
-                      }}
-                    />
-                    <svg className="w-6 h-6 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
-                    </svg>
-                    <span className="text-xs text-cyan-300 font-semibold">
-                      Drop all 4 GIFs here at once, or click to choose multiple files
-                    </span>
-                    <p className="text-[10px] text-slate-400">
-                      Auto-sorts into Idle, Talking, Error, and Working slots (or assign them manually below)
-                    </p>
-                  </div>
-
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-1">
-                    {/* Idle Slot */}
+                ) : (
+                  <div className="space-y-3">
                     <div
-                      onDragOver={(e) => e.preventDefault()}
-                      onDrop={async (e) => {
-                        e.preventDefault();
-                        if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-                          await handleMultiSlotFile("idle", e.dataTransfer.files[0]);
-                        }
-                      }}
-                      className="border border-slate-700 hover:border-cyan-500/50 rounded-lg p-2.5 bg-slate-950/50 flex flex-col items-center text-center gap-1.5"
+                      onClick={() => multiBatchInputRef.current?.click()}
+                      className="border-2 border-dashed border-white/15 hover:border-white/30 rounded-lg p-4 text-center cursor-pointer bg-black/20 transition-colors"
                     >
-                      <span className="text-[11px] font-semibold text-slate-300">
-                        Idle (Required)
+                      <input
+                        ref={multiBatchInputRef}
+                        type="file"
+                        multiple
+                        accept="image/*,.gif"
+                        className="hidden"
+                        onChange={async (e) => {
+                          if (e.target.files && e.target.files.length > 0) {
+                            await handleMultipleFiles(Array.from(e.target.files));
+                          }
+                        }}
+                      />
+                      <span className="text-xs font-mono text-neutral-300">
+                        Drop all 4 GIFs at once or click to batch import
                       </span>
-                      <div className="w-16 h-16 rounded bg-slate-900 border border-slate-800 flex items-center justify-center overflow-hidden">
-                        {multiSprites.idle ? (
-                          <img
-                            src={multiSprites.idle}
-                            alt="Idle preview"
-                            className="w-full h-full object-contain"
-                          />
-                        ) : (
-                          <span className="text-xs text-slate-600">Idle</span>
-                        )}
-                      </div>
-                      <label className="text-[10px] bg-slate-800 hover:bg-slate-700 text-cyan-300 px-2 py-1 rounded cursor-pointer transition-colors">
-                        Choose
-                        <input
-                          type="file"
-                          accept="image/*,.gif"
-                          className="hidden"
-                          onChange={async (e) => {
-                            if (e.target.files && e.target.files[0]) {
-                              await handleMultiSlotFile("idle", e.target.files[0]);
-                            }
-                          }}
-                        />
-                      </label>
                     </div>
 
-                    {/* Talking Slot */}
-                    <div
-                      onDragOver={(e) => e.preventDefault()}
-                      onDrop={async (e) => {
-                        e.preventDefault();
-                        if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-                          await handleMultiSlotFile("talking", e.dataTransfer.files[0]);
-                        }
-                      }}
-                      className="border border-slate-700 hover:border-cyan-500/50 rounded-lg p-2.5 bg-slate-950/50 flex flex-col items-center text-center gap-1.5"
-                    >
-                      <span className="text-[11px] font-semibold text-slate-300">
-                        Talking
-                      </span>
-                      <div className="w-16 h-16 rounded bg-slate-900 border border-slate-800 flex items-center justify-center overflow-hidden">
-                        {multiSprites.talking ? (
-                          <img
-                            src={multiSprites.talking}
-                            alt="Talking preview"
-                            className="w-full h-full object-contain"
-                          />
-                        ) : (
-                          <span className="text-xs text-slate-600">Open Mouth</span>
-                        )}
-                      </div>
-                      <label className="text-[10px] bg-slate-800 hover:bg-slate-700 text-cyan-300 px-2 py-1 rounded cursor-pointer transition-colors">
-                        Choose
-                        <input
-                          type="file"
-                          accept="image/*,.gif"
-                          className="hidden"
-                          onChange={async (e) => {
-                            if (e.target.files && e.target.files[0]) {
-                              await handleMultiSlotFile("talking", e.target.files[0]);
-                            }
-                          }}
-                        />
-                      </label>
-                    </div>
-
-                    {/* Error Slot */}
-                    <div
-                      onDragOver={(e) => e.preventDefault()}
-                      onDrop={async (e) => {
-                        e.preventDefault();
-                        if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-                          await handleMultiSlotFile("error", e.dataTransfer.files[0]);
-                        }
-                      }}
-                      className="border border-slate-700 hover:border-cyan-500/50 rounded-lg p-2.5 bg-slate-950/50 flex flex-col items-center text-center gap-1.5"
-                    >
-                      <span className="text-[11px] font-semibold text-slate-300">
-                        Error / Shocked
-                      </span>
-                      <div className="w-16 h-16 rounded bg-slate-900 border border-slate-800 flex items-center justify-center overflow-hidden">
-                        {multiSprites.error ? (
-                          <img
-                            src={multiSprites.error}
-                            alt="Error preview"
-                            className="w-full h-full object-contain"
-                          />
-                        ) : (
-                          <span className="text-xs text-slate-600">&gt; &lt;</span>
-                        )}
-                      </div>
-                      <label className="text-[10px] bg-slate-800 hover:bg-slate-700 text-cyan-300 px-2 py-1 rounded cursor-pointer transition-colors">
-                        Choose
-                        <input
-                          type="file"
-                          accept="image/*,.gif"
-                          className="hidden"
-                          onChange={async (e) => {
-                            if (e.target.files && e.target.files[0]) {
-                              await handleMultiSlotFile("error", e.target.files[0]);
-                            }
-                          }}
-                        />
-                      </label>
-                    </div>
-
-                    {/* Working Slot */}
-                    <div
-                      onDragOver={(e) => e.preventDefault()}
-                      onDrop={async (e) => {
-                        e.preventDefault();
-                        if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-                          await handleMultiSlotFile("working", e.dataTransfer.files[0]);
-                        }
-                      }}
-                      className="border border-slate-700 hover:border-cyan-500/50 rounded-lg p-2.5 bg-slate-950/50 flex flex-col items-center text-center gap-1.5"
-                    >
-                      <span className="text-[11px] font-semibold text-slate-300">
-                        Working (Optional)
-                      </span>
-                      <div className="w-16 h-16 rounded bg-slate-900 border border-slate-800 flex items-center justify-center overflow-hidden">
-                        {multiSprites.working ? (
-                          <img
-                            src={multiSprites.working}
-                            alt="Working preview"
-                            className="w-full h-full object-contain"
-                          />
-                        ) : (
-                          <span className="text-xs text-slate-600">Typing</span>
-                        )}
-                      </div>
-                      <label className="text-[10px] bg-slate-800 hover:bg-slate-700 text-cyan-300 px-2 py-1 rounded cursor-pointer transition-colors">
-                        Choose
-                        <input
-                          type="file"
-                          accept="image/*,.gif"
-                          className="hidden"
-                          onChange={async (e) => {
-                            if (e.target.files && e.target.files[0]) {
-                              await handleMultiSlotFile("working", e.target.files[0]);
-                            }
-                          }}
-                        />
-                      </label>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                      {(["idle", "talking", "error", "working"] as const).map((slot) => (
+                        <div key={slot} className="bg-black/20 border border-white/5 rounded-lg p-2.5 text-center">
+                          <span className="text-[10px] font-mono text-neutral-400 uppercase block mb-1">
+                            {slot}
+                          </span>
+                          <div className="w-full h-16 bg-black/40 rounded flex items-center justify-center mb-2 overflow-hidden">
+                            {multiSprites[slot] ? (
+                              <img src={multiSprites[slot]} alt={slot} className="max-h-full max-w-full object-contain" />
+                            ) : (
+                              <span className="text-[10px] text-neutral-600 font-mono">Empty</span>
+                            )}
+                          </div>
+                          <label className="text-[10px] bg-white/10 hover:bg-white/15 text-neutral-300 px-2 py-0.5 rounded cursor-pointer font-mono">
+                            Select
+                            <input
+                              type="file"
+                              accept="image/*,.gif"
+                              className="hidden"
+                              onChange={async (e) => {
+                                if (e.target.files && e.target.files[0]) {
+                                  await handleMultiSlotFile(slot, e.target.files[0]);
+                                }
+                              }}
+                            />
+                          </label>
+                        </div>
+                      ))}
                     </div>
                   </div>
-                </div>
-              )}
+                )}
 
-              {/* Install Button & Status */}
-              <div className="pt-2 flex flex-col sm:flex-row items-center justify-between gap-2">
-                <div>
-                  {errorMessage && (
-                    <span className="text-xs text-red-400 font-medium">
-                      {errorMessage}
-                    </span>
-                  )}
-                </div>
                 <button
                   type="button"
                   onClick={handleSaveCustomAvatar}
-                  disabled={
-                    isSaving ||
-                    (uploadMode === "single"
-                      ? !singleImageUrl
-                      : !multiSprites.idle)
-                  }
-                  className="bg-cyan-600 hover:bg-cyan-500 disabled:opacity-40 disabled:hover:bg-cyan-600 text-white text-xs px-5 py-2.5 rounded-lg font-bold transition-all shadow-lg shadow-cyan-600/20 active:scale-95"
+                  disabled={isSaving}
+                  className="bg-[#EBA821] hover:bg-[#d89619] disabled:opacity-50 text-[#12141A] font-bold text-xs px-5 py-2.5 rounded-lg active:scale-95 transition-all"
                 >
-                  {isSaving ? "Сохранение маскота..." : "Install & Activate Avatar"}
+                  {isSaving ? "INSTALLING..." : "INSTALL & EQUIP AVATAR"}
                 </button>
               </div>
             </div>
-          </div>
-        )}
+          )}
 
-        {/* Memory Tab */}
-        {activeTab === "memory" && (
-          <div className="space-y-5">
-            {/* Header */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-4">
-              <div>
-                <h2 className="text-lg font-bold text-slate-100">
-                  Memory & Knowledge Base
-                </h2>
-                <p className="text-xs text-slate-400 mt-0.5">
-                  Долгосрочная база фактов SQLite (<code className="text-cyan-400">companion_memory.db</code>).
-                  Ассистент автоматически учитывает эти правила и факты в каждом запросе.
-                </p>
-              </div>
-
-              <button
-                onClick={() => setIsAddMemoryOpen((prev) => !prev)}
-                className={`text-xs px-3.5 py-2 rounded-lg font-medium transition-all flex items-center gap-1.5 shadow-sm ${
-                  isAddMemoryOpen
-                    ? "bg-slate-800 text-slate-300 border border-slate-700"
-                    : "bg-cyan-600 hover:bg-cyan-500 text-white shadow-cyan-600/20"
-                }`}
-              >
-                <span>{isAddMemoryOpen ? "✕" : "+"}</span>
-                <span>{isAddMemoryOpen ? "Скрыть форму" : "Добавить знание"}</span>
-              </button>
-            </div>
-
-            {/* Notification alert */}
-            {memoryStatus && (
-              <div className="bg-cyan-950/60 border border-cyan-500/40 text-cyan-300 text-xs px-3.5 py-2.5 rounded-lg flex items-center justify-between animate-fadeIn">
-                <span>{memoryStatus}</span>
-                <button
-                  onClick={() => setMemoryStatus("")}
-                  className="text-cyan-400 hover:text-cyan-200 text-sm ml-2"
-                >
-                  ✕
-                </button>
-              </div>
-            )}
-
-            {/* Stats Overview Counters */}
-            <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5">
-              <div
-                onClick={() => setSelectedCategory("all")}
-                className={`p-2.5 rounded-xl border text-xs cursor-pointer transition-all ${
-                  selectedCategory === "all"
-                    ? "bg-slate-800 border-cyan-500/50 shadow-sm shadow-cyan-500/10"
-                    : "bg-slate-900/60 border-slate-800/80 hover:bg-slate-800/50"
-                }`}
-              >
-                <div className="text-[10px] text-slate-400 uppercase tracking-wider font-semibold">Всего</div>
-                <div className="text-base font-bold text-slate-100 mt-0.5">{memories.length}</div>
-              </div>
-
-              <div
-                onClick={() => setSelectedCategory("preference")}
-                className={`p-2.5 rounded-xl border text-xs cursor-pointer transition-all ${
-                  selectedCategory === "preference"
-                    ? "bg-emerald-950/40 border-emerald-500/50"
-                    : "bg-slate-900/60 border-slate-800/80 hover:bg-slate-800/50"
-                }`}
-              >
-                <div className="text-[10px] text-emerald-400 uppercase tracking-wider font-semibold">
-                  Правила
-                </div>
-                <div className="text-base font-bold text-emerald-300 mt-0.5">
-                  {memories.filter((m) => m.category === "preference" || m.category === "profile").length}
-                </div>
-              </div>
-
-              <div
-                onClick={() => setSelectedCategory("fact")}
-                className={`p-2.5 rounded-xl border text-xs cursor-pointer transition-all ${
-                  selectedCategory === "fact"
-                    ? "bg-cyan-950/40 border-cyan-500/50"
-                    : "bg-slate-900/60 border-slate-800/80 hover:bg-slate-800/50"
-                }`}
-              >
-                <div className="text-[10px] text-cyan-400 uppercase tracking-wider font-semibold">
-                  Факты
-                </div>
-                <div className="text-base font-bold text-cyan-300 mt-0.5">
-                  {memories.filter((m) => m.category === "fact").length}
-                </div>
-              </div>
-
-              <div
-                onClick={() => setSelectedCategory("project")}
-                className={`p-2.5 rounded-xl border text-xs cursor-pointer transition-all ${
-                  selectedCategory === "project"
-                    ? "bg-amber-950/40 border-amber-500/50"
-                    : "bg-slate-900/60 border-slate-800/80 hover:bg-slate-800/50"
-                }`}
-              >
-                <div className="text-[10px] text-amber-400 uppercase tracking-wider font-semibold">
-                  Проекты
-                </div>
-                <div className="text-base font-bold text-amber-300 mt-0.5">
-                  {memories.filter((m) => m.category === "project").length}
-                </div>
-              </div>
-
-              <div
-                onClick={() => setSelectedCategory("summary")}
-                className={`p-2.5 rounded-xl border text-xs cursor-pointer transition-all ${
-                  selectedCategory === "summary"
-                    ? "bg-purple-950/40 border-purple-500/50"
-                    : "bg-slate-900/60 border-slate-800/80 hover:bg-slate-800/50"
-                }`}
-              >
-                <div className="text-[10px] text-purple-400 uppercase tracking-wider font-semibold">
-                  Сводки
-                </div>
-                <div className="text-base font-bold text-purple-300 mt-0.5">
-                  {memories.filter((m) => m.category === "summary").length}
-                </div>
-              </div>
-            </div>
-
-            {/* Add Memory Form Modal / Inline Collapsible */}
-            {isAddMemoryOpen && (
-              <form
-                onSubmit={handleSaveNewMemory}
-                className="bg-slate-900 border border-cyan-500/30 rounded-xl p-4 space-y-3.5 shadow-lg shadow-cyan-950/20"
-              >
-                <div className="flex items-center justify-between border-b border-slate-800 pb-2">
-                  <h3 className="text-xs font-bold text-cyan-300 uppercase tracking-wider">
-                    Добавить новое правило или факт в SQLite
+          {/* =========================================================================
+              Tab 3: Memory Archive
+              ========================================================================= */}
+          {activeTab === "memory" && (
+            <div className="space-y-5">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-xs font-mono font-bold tracking-widest uppercase text-neutral-400">
+                    // LONG-TERM MEMORY ARCHIVE (SQLITE)
                   </h3>
-                  <button
-                    type="button"
-                    onClick={() => setIsAddMemoryOpen(false)}
-                    className="text-slate-400 hover:text-slate-200 text-xs"
-                  >
-                    Отмена
-                  </button>
+                  <p className="text-xs text-neutral-400 mt-0.5">
+                    Факты и правила, автоматически загружаемые в системный промпт нейросети.
+                  </p>
                 </div>
+                <button
+                  type="button"
+                  onClick={() => setIsAddMemoryOpen(!isAddMemoryOpen)}
+                  className="bg-[#EBA821] hover:bg-[#d89619] text-[#12141A] font-bold text-xs px-4 py-2 rounded-lg transition-all"
+                >
+                  {isAddMemoryOpen ? "✕ ЗАКРЫТЬ" : "+ ДОБАВИТЬ ЗАПИСЬ"}
+                </button>
+              </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-[11px] text-slate-300 font-medium mb-1">Категория</label>
-                    <select
-                      value={newMemoryCategory}
-                      onChange={(e) => setNewMemoryCategory(e.target.value)}
-                      className="w-full bg-slate-950 border border-slate-800 rounded-lg text-xs px-3 py-2 text-slate-200 focus:border-cyan-400 outline-none"
-                    >
-                      <option value="preference">Правило / Предпочтение (preference)</option>
-                      <option value="fact">Факт о пользователе (fact)</option>
-                      <option value="project">Заметка по проекту (project)</option>
-                      <option value="profile">Профиль пользователя (profile)</option>
-                    </select>
+              {/* Status Alert */}
+              {memoryStatus && (
+                <div className="text-xs font-mono text-[#2E9E6B] bg-emerald-500/10 border border-emerald-500/20 p-2.5 rounded-lg">
+                  {memoryStatus}
+                </div>
+              )}
+
+              {/* Category Filter Pills */}
+              <div className="flex flex-wrap gap-2">
+                {[
+                  { id: "all", label: `ALL [${memories.length}]` },
+                  { id: "preference", label: "RULES" },
+                  { id: "fact", label: "FACTS" },
+                  { id: "project", label: "PROJECTS" },
+                  { id: "summary", label: "SUMMARIES" },
+                ].map((cat) => (
+                  <button
+                    key={cat.id}
+                    type="button"
+                    onClick={() => setSelectedCategory(cat.id)}
+                    className={`px-3 py-1 rounded text-xs font-mono border transition-colors ${
+                      selectedCategory === cat.id
+                        ? "bg-[#EBA821] text-[#12141A] font-bold border-transparent"
+                        : "bg-black/20 border-white/10 text-neutral-400 hover:text-white"
+                    }`}
+                  >
+                    {cat.label}
+                  </button>
+                ))}
+              </div>
+
+              {/* Inline Add Form */}
+              {isAddMemoryOpen && (
+                <form
+                  onSubmit={handleSaveNewMemory}
+                  className="bg-black/30 border border-white/10 rounded-lg p-4 space-y-3"
+                >
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-[10px] font-mono text-neutral-400 uppercase block mb-1">Категория</label>
+                      <select
+                        value={newMemoryCategory}
+                        onChange={(e) => setNewMemoryCategory(e.target.value)}
+                        className="w-full bg-black/40 border border-white/10 rounded text-xs px-3 py-2 text-neutral-200 outline-none"
+                      >
+                        <option value="preference">preference (Правило)</option>
+                        <option value="fact">fact (Факт)</option>
+                        <option value="project">project (Проект)</option>
+                        <option value="profile">profile (Профиль)</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-mono text-neutral-400 uppercase block mb-1">
+                        Ключ (snake_case)
+                      </label>
+                      <input
+                        type="text"
+                        value={newMemoryKey}
+                        onChange={(e) => setNewMemoryKey(e.target.value)}
+                        placeholder="backend_rust"
+                        className="w-full bg-black/40 border border-white/10 rounded text-xs px-3 py-2 text-neutral-200 font-mono outline-none"
+                      />
+                    </div>
                   </div>
 
                   <div>
-                    <label className="block text-[11px] text-slate-300 font-medium mb-1">
-                      Ключ идентификатора (snake_case)
-                    </label>
-                    <input
-                      type="text"
-                      value={newMemoryKey}
-                      onChange={(e) => setNewMemoryKey(e.target.value)}
-                      placeholder="например: backend_rust или no_emojis"
-                      className="w-full bg-slate-950 border border-slate-800 rounded-lg text-xs px-3 py-2 text-slate-200 focus:border-cyan-400 outline-none font-mono"
+                    <label className="text-[10px] font-mono text-neutral-400 uppercase block mb-1">Содержание</label>
+                    <textarea
+                      rows={2}
+                      value={newMemoryContent}
+                      onChange={(e) => setNewMemoryContent(e.target.value)}
+                      placeholder="Описание факта или правила..."
+                      className="w-full bg-black/40 border border-white/10 rounded text-xs px-3 py-2 text-neutral-200 outline-none resize-none"
                     />
                   </div>
-                </div>
 
-                <div>
-                  <label className="block text-[11px] text-slate-300 font-medium mb-1">
-                    Содержание факта или правила
-                  </label>
-                  <textarea
-                    rows={2}
-                    value={newMemoryContent}
-                    onChange={(e) => setNewMemoryContent(e.target.value)}
-                    placeholder="например: 'Я пишу бекенд на Rust' или 'Не используй эмодзи в ответах'"
-                    className="w-full bg-slate-950 border border-slate-800 rounded-lg text-xs px-3 py-2 text-slate-200 focus:border-cyan-400 outline-none resize-none"
-                  />
-                </div>
+                  <div className="flex justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setIsAddMemoryOpen(false)}
+                      className="px-3 py-1.5 text-xs text-neutral-400 hover:text-white"
+                    >
+                      Отмена
+                    </button>
+                    <button
+                      type="submit"
+                      className="bg-[#EBA821] hover:bg-[#d89619] text-[#12141A] font-bold text-xs px-4 py-1.5 rounded"
+                    >
+                      Сохранить
+                    </button>
+                  </div>
+                </form>
+              )}
 
-                <div>
-                  <label className="block text-[11px] text-slate-300 font-medium mb-1">
-                    Теги (через запятую, опционально)
-                  </label>
-                  <input
-                    type="text"
-                    value={newMemoryTags}
-                    onChange={(e) => setNewMemoryTags(e.target.value)}
-                    placeholder="например: rust, backend, axum"
-                    className="w-full bg-slate-950 border border-slate-800 rounded-lg text-xs px-3 py-2 text-slate-200 focus:border-cyan-400 outline-none font-mono"
-                  />
-                </div>
-
-                <div className="flex justify-end gap-2 pt-1">
-                  <button
-                    type="button"
-                    onClick={() => setIsAddMemoryOpen(false)}
-                    className="px-3 py-1.5 text-xs text-slate-400 hover:text-slate-200"
-                  >
-                    Отмена
-                  </button>
-                  <button
-                    type="submit"
-                    className="bg-cyan-600 hover:bg-cyan-500 text-white text-xs px-4 py-1.5 rounded-lg font-bold shadow-md shadow-cyan-600/20 active:scale-95"
-                  >
-                    Сохранить в память
-                  </button>
-                </div>
-              </form>
-            )}
-
-            {/* Search Bar & Filter Pills */}
-            <div className="flex flex-col sm:flex-row gap-2.5">
-              <div className="relative flex-1">
+              {/* Search Box */}
+              <div className="relative">
                 <input
                   type="text"
                   value={memoryQuery}
                   onChange={(e) => setMemoryQuery(e.target.value)}
-                  placeholder="Поиск по ключу, тексту факта или тегам..."
-                  className="w-full bg-slate-900 border border-slate-800 text-xs px-3 py-2.5 rounded-lg focus:border-cyan-400 outline-none font-mono text-slate-200 pr-16"
+                  placeholder="Поиск по ключу, тексту или тегам..."
+                  className="w-full bg-black/30 border border-white/10 text-xs px-3 py-2 rounded-lg font-mono text-neutral-200 outline-none"
                   onKeyDown={(e) => e.key === "Enter" && handleSearchMemory()}
                 />
-                {memoryQuery && (
-                  <button
-                    onClick={() => {
-                      setMemoryQuery("");
-                      loadAllMemories();
-                    }}
-                    className="absolute right-2 top-2.5 text-slate-500 hover:text-slate-300 text-xs px-1"
-                  >
-                    ✕
-                  </button>
-                )}
               </div>
 
-              <div className="flex gap-2">
-                <button
-                  onClick={handleSearchMemory}
-                  className="bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs px-4 py-2.5 rounded-lg border border-slate-700 font-medium"
-                >
-                  Найти
-                </button>
-                <button
-                  onClick={() => {
-                    setMemoryQuery("");
-                    loadAllMemories();
-                  }}
-                  className="bg-slate-800/60 hover:bg-slate-800 text-slate-400 hover:text-slate-200 text-xs px-3 py-2.5 rounded-lg border border-slate-800"
-                  title="Обновить список"
-                >
-                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                  </svg>
-                </button>
-              </div>
-            </div>
+              {/* Memory Items List (divide-y divide-white/10) */}
+              <div className="divide-y divide-white/10 border-t border-b border-white/10">
+                {memories
+                  .filter((m) => {
+                    const matchesCat =
+                      selectedCategory === "all" ||
+                      (selectedCategory === "preference" &&
+                        (m.category === "preference" || m.category === "profile")) ||
+                      m.category === selectedCategory;
+                    const q = memoryQuery.trim().toLowerCase();
+                    const matchesQuery =
+                      !q ||
+                      m.key.toLowerCase().includes(q) ||
+                      m.content.toLowerCase().includes(q);
+                    return matchesCat && matchesQuery;
+                  })
+                  .map((m) => (
+                    <div key={m.id || m.key} className="py-3 flex flex-col gap-1.5">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span
+                            className={`text-[9px] font-mono px-1.5 py-0.5 rounded font-bold uppercase ${
+                              m.category === "preference"
+                                ? "bg-emerald-500/20 text-[#2E9E6B]"
+                                : m.category === "fact"
+                                ? "bg-amber-500/20 text-[#EBA821]"
+                                : "bg-white/10 text-neutral-300"
+                            }`}
+                          >
+                            {m.category}
+                          </span>
+                          <span className="text-xs font-mono font-bold text-neutral-200">{m.key}</span>
+                        </div>
+                        <div className="flex items-center gap-2 text-neutral-500">
+                          <button
+                            onClick={() => handleStartEdit(m)}
+                            className="hover:text-neutral-200 text-xs"
+                            title="Редактировать"
+                          >
+                            ✎
+                          </button>
+                          <button
+                            onClick={() => handleDeleteMemory(m.id, m.key)}
+                            className="hover:text-[#D94848] text-xs"
+                            title="Удалить"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      </div>
 
-            {/* Cards List */}
-            {(() => {
-              const filtered = memories.filter((m) => {
-                const matchesCategory =
-                  selectedCategory === "all" ||
-                  (selectedCategory === "preference" &&
-                    (m.category === "preference" || m.category === "profile")) ||
-                  m.category === selectedCategory;
-
-                const q = memoryQuery.trim().toLowerCase();
-                const matchesQuery =
-                  !q ||
-                  m.key.toLowerCase().includes(q) ||
-                  m.content.toLowerCase().includes(q) ||
-                  m.tags?.some((t) => t.toLowerCase().includes(q));
-
-                return matchesCategory && matchesQuery;
-              });
-
-              if (filtered.length === 0) {
-                return (
-                  <div className="bg-slate-900/40 border border-slate-800/80 rounded-xl p-8 text-center text-xs text-slate-500 space-y-3">
-                    <p className="text-slate-400 font-medium">
-                      {memoryQuery
-                        ? "По вашему запросу ничего не найдено."
-                        : "В базе SQLite пока нет сохраненных воспоминаний."}
-                    </p>
-                    <p className="text-[11px] text-slate-500 max-w-md mx-auto">
-                      Вы можете добавить факты вручную или сказать маскоту в диалоге, например:
-                      «Я пишу бекенд на Rust» или «Не используй эмодзи» — и модель автоматически использует системный инструмент <code>save_memory</code>.
-                    </p>
-                    <div className="flex flex-wrap justify-center gap-2 pt-2">
-                      <button
-                        onClick={async () => {
-                          const item: MemoryItem = {
-                            key: "no_emojis",
-                            category: "preference",
-                            content: "Не использовать эмодзи в ответах ассистента",
-                            tags: ["rules", "formatting"],
-                            updated_at: Math.floor(Date.now() / 1000),
-                          };
-                          await invoke("save_memory_entry", { item });
-                          await loadAllMemories();
-                          setMemoryStatus("Добавлено правило: Не использовать эмодзи.");
-                        }}
-                        className="bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs px-3 py-1.5 rounded-lg border border-slate-700"
-                      >
-                        + Пример: Не использовать эмодзи
-                      </button>
-                      <button
-                        onClick={async () => {
-                          const item: MemoryItem = {
-                            key: "backend_rust",
-                            category: "fact",
-                            content: "Пользователь разрабатывает бекенд на Rust с использованием Tokio",
-                            tags: ["rust", "backend", "skills"],
-                            updated_at: Math.floor(Date.now() / 1000),
-                          };
-                          await invoke("save_memory_entry", { item });
-                          await loadAllMemories();
-                          setMemoryStatus("Добавлен факт: Разработка на Rust.");
-                        }}
-                        className="bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs px-3 py-1.5 rounded-lg border border-slate-700"
-                      >
-                        + Пример: Бекенд на Rust
-                      </button>
-                    </div>
-                  </div>
-                );
-              }
-
-              return (
-                <div className="grid grid-cols-1 gap-3">
-                  {filtered.map((m) => {
-                    const isPref = m.category === "preference" || m.category === "profile";
-                    const isFact = m.category === "fact";
-                    const isProj = m.category === "project";
-                    const isSumm = m.category === "summary";
-
-                    const badgeStyle = isPref
-                      ? "bg-emerald-500/10 text-emerald-300 border-emerald-500/30"
-                      : isFact
-                      ? "bg-cyan-500/10 text-cyan-300 border-cyan-500/30"
-                      : isProj
-                      ? "bg-amber-500/10 text-amber-300 border-amber-500/30"
-                      : isSumm
-                      ? "bg-purple-500/10 text-purple-300 border-purple-500/30"
-                      : "bg-slate-800 text-slate-300 border-slate-700";
-
-                    const badgeLabel = isPref
-                      ? "Правило"
-                      : isFact
-                      ? "Факт"
-                      : isProj
-                      ? "Проект"
-                      : isSumm
-                      ? "Сводка"
-                      : m.category;
-
-                    const isEditing = editingMemoryId === m.id;
-
-                    return (
-                      <div
-                        key={m.id || m.key}
-                        className="bg-slate-900 border border-slate-800 hover:border-slate-700/80 rounded-xl p-3.5 transition-all space-y-2.5 shadow-sm"
-                      >
-                        {/* Card Top Row */}
-                        <div className="flex items-center justify-between gap-2">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <span
-                              className={`text-[10px] uppercase font-bold px-2 py-0.5 rounded-md border ${badgeStyle}`}
+                      {editingMemoryId === m.id ? (
+                        <div className="space-y-2 pt-1">
+                          <textarea
+                            rows={2}
+                            value={editContent}
+                            onChange={(e) => setEditContent(e.target.value)}
+                            className="w-full bg-black/40 border border-white/10 rounded p-2 text-xs text-neutral-200 outline-none"
+                          />
+                          <div className="flex justify-end gap-2">
+                            <button
+                              onClick={() => setEditingMemoryId(null)}
+                              className="px-2 py-1 text-xs text-neutral-400"
                             >
-                              {badgeLabel}
-                            </span>
-                            <span className="font-mono text-xs font-semibold text-slate-200">
-                              {m.key}
-                            </span>
-                          </div>
-
-                          <div className="flex items-center gap-2">
-                            <span className="text-[10px] text-slate-500 font-mono">
-                              {new Date(m.updated_at * 1000).toLocaleString("ru-RU", {
-                                day: "2-digit",
-                                month: "2-digit",
-                                year: "numeric",
-                                hour: "2-digit",
-                                minute: "2-digit",
-                              })}
-                            </span>
-
-                            {!isEditing && (
-                              <div className="flex items-center gap-1 ml-1">
-                                <button
-                                  onClick={() => handleStartEdit(m)}
-                                  className="text-slate-400 hover:text-cyan-300 p-1 rounded hover:bg-slate-800 text-xs transition-colors"
-                                  title="Редактировать"
-                                >
-                                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
-                                  </svg>
-                                </button>
-                                <button
-                                  onClick={() => handleDeleteMemory(m.id, m.key)}
-                                  className="text-slate-400 hover:text-red-400 p-1 rounded hover:bg-slate-800 text-xs transition-colors"
-                                  title="Удалить"
-                                >
-                                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                                  </svg>
-                                </button>
-                              </div>
-                            )}
+                              Отмена
+                            </button>
+                            <button
+                              onClick={() => handleSaveEdit(m)}
+                              className="bg-[#EBA821] text-[#12141A] font-bold text-xs px-3 py-1 rounded"
+                            >
+                              Сохранить
+                            </button>
                           </div>
                         </div>
-
-                        {/* Card Content */}
-                        {isEditing ? (
-                          <div className="space-y-2 pt-1 border-t border-slate-800">
-                            <div>
-                              <label className="text-[10px] text-slate-400 block mb-0.5">Содержание</label>
-                              <textarea
-                                rows={2}
-                                value={editContent}
-                                onChange={(e) => setEditContent(e.target.value)}
-                                className="w-full bg-slate-950 border border-slate-800 rounded-lg text-xs p-2 text-slate-200 focus:border-cyan-400 outline-none resize-none font-sans"
-                              />
-                            </div>
-                            <div>
-                              <label className="text-[10px] text-slate-400 block mb-0.5">
-                                Теги (через запятую)
-                              </label>
-                              <input
-                                type="text"
-                                value={editTags}
-                                onChange={(e) => setEditTags(e.target.value)}
-                                className="w-full bg-slate-950 border border-slate-800 rounded-lg text-xs px-2 py-1 text-slate-200 focus:border-cyan-400 outline-none font-mono"
-                              />
-                            </div>
-                            <div className="flex justify-end gap-2 pt-1">
-                              <button
-                                onClick={() => setEditingMemoryId(null)}
-                                className="px-2.5 py-1 text-xs text-slate-400 hover:text-slate-200"
-                              >
-                                Отмена
-                              </button>
-                              <button
-                                onClick={() => handleSaveEdit(m)}
-                                className="bg-cyan-600 hover:bg-cyan-500 text-white text-xs px-3 py-1 rounded font-medium shadow-sm"
-                              >
-                                Сохранить
-                              </button>
-                            </div>
-                          </div>
-                        ) : (
-                          <p className="text-xs text-slate-300 leading-relaxed font-sans select-text">
-                            {m.content}
-                          </p>
-                        )}
-
-                        {/* Tags list */}
-                        {!isEditing && m.tags && m.tags.length > 0 && (
-                          <div className="flex flex-wrap gap-1.5 pt-1">
-                            {m.tags.map((tag, idx) => (
-                              <span
-                                key={idx}
-                                onClick={() => {
-                                  setMemoryQuery(tag);
-                                  handleSearchMemory();
-                                }}
-                                className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-slate-800/80 hover:bg-slate-700/80 text-slate-400 hover:text-slate-200 cursor-pointer transition-colors"
-                              >
-                                #{tag}
-                              </span>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              );
-            })()}
-          </div>
-        )}
-
-        {/* Husk Tab */}
-        {activeTab === "husk" && (
-          <div className="space-y-4">
-            <div>
-              <h2 className="text-lg font-bold text-slate-100">Husk Mode Live IPC Stream</h2>
-              <p className="text-xs text-slate-400">
-                Real-time events from terminal hooks, Claude Code, cargo, and test runners.
-              </p>
+                      ) : (
+                        <p className="text-xs text-neutral-300 leading-relaxed">{m.content}</p>
+                      )}
+                    </div>
+                  ))}
+              </div>
             </div>
+          )}
 
-            <div className="bg-slate-900 border border-slate-800 rounded-xl p-3 font-mono text-xs overflow-x-auto space-y-1 max-h-[460px] overflow-y-auto">
-              {huskLogs.length === 0 ? (
-                <div className="text-slate-500 py-8 text-center text-xs">
-                  Awaiting events on <code className="text-cyan-400">/tmp/mascot-husk.sock</code>...
-                  <p className="text-[10px] mt-1 text-slate-600">
-                    Test with: <code className="text-slate-400">echo '&#123;"state":"busy","action":"editing_file"&#125;' | nc -U /tmp/mascot-husk.sock</code>
-                  </p>
-                </div>
-              ) : (
-                huskLogs.map((log, i) => (
-                  <div key={i} className="flex gap-3 text-[11px] border-b border-slate-800/50 py-1">
-                    <span className="text-slate-500">{log.timestamp}</span>
-                    <span
-                      className={`font-bold ${
-                        log.state === "error"
-                          ? "text-red-400"
-                          : log.state === "busy"
-                          ? "text-yellow-400"
-                          : "text-emerald-400"
-                      }`}
-                    >
-                      [{log.state.toUpperCase()}]
-                    </span>
-                    <span className="text-slate-300">{log.action || log.message || "event"}</span>
+          {/* =========================================================================
+              Tab 4: Husk Mode IPC Stream
+              ========================================================================= */}
+          {activeTab === "husk" && (
+            <div className="space-y-4">
+              <div>
+                <h3 className="text-xs font-mono font-bold tracking-widest uppercase text-neutral-400">
+                  // HUSK UNIX IPC LOG STREAM
+                </h3>
+                <p className="text-xs text-neutral-400 mt-0.5">
+                  События в реальном времени из терминала, тестов и скриптов через /tmp/mascot-husk.sock
+                </p>
+              </div>
+
+              <div className="bg-[#0A0C10] border border-white/10 rounded-lg p-4 font-mono text-xs text-neutral-300 max-h-[500px] overflow-y-auto space-y-1.5 shadow-inner">
+                {huskLogs.length === 0 ? (
+                  <div className="text-neutral-500 py-10 text-center text-xs">
+                    Ожидание событий на сокете <code className="text-[#EBA821]">/tmp/mascot-husk.sock</code>...
                   </div>
-                ))
-              )}
+                ) : (
+                  huskLogs.map((log, i) => (
+                    <div key={i} className="flex gap-3 text-[11px] border-b border-white/5 py-1">
+                      <span className="text-neutral-500">{log.timestamp}</span>
+                      <span
+                        className={`font-bold ${
+                          log.state === "error"
+                            ? "text-[#D94848]"
+                            : log.state === "busy"
+                            ? "text-[#EBA821]"
+                            : "text-[#2E9E6B]"
+                        }`}
+                      >
+                        [{log.state.toUpperCase()}]
+                      </span>
+                      <span className="text-neutral-200">{log.action || log.message || "event"}</span>
+                    </div>
+                  ))
+                )}
+              </div>
             </div>
-          </div>
-        )}
+          )}
+        </div>
       </div>
     </div>
   );
