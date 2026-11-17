@@ -768,4 +768,13 @@ mod tests {
         let geom = rt.block_on(win_ctrl.get_active_window()).unwrap();
         assert_eq!(geom.id, "win-focused");
     }
+
+    #[test]
+    fn test_macos_controller_instantiation() {
+        let store = Arc::new(MemoryStore::new(":memory:").expect("sqlite in-memory"));
+        let mac_ctrl = MacOsController { memory_store: store };
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let geom = rt.block_on(mac_ctrl.get_active_window()).unwrap();
+        assert!(!geom.id.is_empty());
+    }
 }
