@@ -693,6 +693,9 @@ export const DashboardWindow: React.FC = () => {
     }
   };
 
+  const isWindows = systemContext?.profile?.os_name === "Windows";
+  const huskEndpoint = isWindows ? "\\\\.\\pipe\\mascot-husk" : "/tmp/mascot-husk.sock";
+
   return (
     <div className="flex h-screen bg-[#0E1015] text-neutral-200 font-sans select-none antialiased">
       {/* =========================================================================
@@ -799,7 +802,7 @@ export const DashboardWindow: React.FC = () => {
             <span className="w-1.5 h-1.5 rounded-full bg-[#2E9E6B] animate-pulse" />
             <span>SOCKET READY</span>
           </div>
-          <div className="truncate text-neutral-500 text-[9px]">/tmp/mascot-husk.sock</div>
+          <div className="truncate text-neutral-500 text-[9px]">{huskEndpoint}</div>
         </div>
       </div>
 
@@ -1755,17 +1758,17 @@ export const DashboardWindow: React.FC = () => {
             <div className="space-y-4">
               <div>
                 <h3 className="text-xs font-mono font-bold tracking-widest uppercase text-neutral-400">
-                  // HUSK UNIX IPC LOG STREAM
+                  // HUSK IPC LOG STREAM
                 </h3>
                 <p className="text-xs text-neutral-400 mt-0.5">
-                  События в реальном времени из терминала, тестов и скриптов через /tmp/mascot-husk.sock
+                  События в реальном времени из терминала, тестов и скриптов через {huskEndpoint}
                 </p>
               </div>
 
               <div className="bg-[#0A0C10] border border-white/10 rounded-lg p-4 font-mono text-xs text-neutral-300 max-h-[500px] overflow-y-auto space-y-1.5 shadow-inner">
                 {huskLogs.length === 0 ? (
                   <div className="text-neutral-500 py-10 text-center text-xs">
-                    Ожидание событий на сокете <code className="text-[#EBA821]">/tmp/mascot-husk.sock</code>...
+                    Ожидание событий на канале <code className="text-[#EBA821]">{huskEndpoint}</code>...
                   </div>
                 ) : (
                   huskLogs.map((log, i) => (

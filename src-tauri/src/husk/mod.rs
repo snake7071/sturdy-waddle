@@ -91,21 +91,65 @@ pub async fn start_husk_listener(app_handle: AppHandle) -> Result<(), Box<dyn st
     const PIPE_NAME: &str = r"\\.\pipe\mascot-husk";
     println!("[HuskMode] Named Pipe active at {}", PIPE_NAME);
 
+    let mut is_first = true;
+
     loop {
-        let server = ServerOptions::new()
-            .first_pipe_instance(true)
-            .create(PIPE_NAME)?;
+        let server = match ServerOptions::new()
+            .first_pipe_instance(is_first)
+            .create(PIPE_NAME)
+        {
+            Ok(s) => {
+                is_first = false;
+                s
+            }
+            Err(e) => {
+                eprintln!("[HuskMode] Windows Named Pipe create error: {}", e);
+                tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
+                continue;
+            }
+        };
 
-        server.connect().await?;
+        if let Err(e) = server.connect().await {
+            eprintln!("[HuskMode] Windows Named Pipe connect error: {}", e);
+            continue;
+        }
+
         let handle = app_handle.clone();
-
         tokio::spawn(async move {
             let (reader, _) = tokio::io::split(server);
             let mut lines = tokio::io::BufReader::new(reader).lines();
 
             while let Ok(Some(line)) = lines.next_line().await {
-                if let Ok(event) = serde_json::from_str::<HuskEventPayload>(line.trim()) {
-                    let _ = handle.emit("husk-event", &event);
+                let trimmed = line.trim();
+                if trimmed.is_empty() {
+                    continue;
+                }
+
+                match serde_json::from_str::<HuskEventPayload>(trimmed) {
+                    Ok(event) => {
+                        let _ = handle.emit("husk-event", &event);
+                    }
+                    Err(_) => {
+                        let fallback = HuskEventPayload {
+                            state: if trimmed.contains("fail") || trimmed.contains("error") {
+                                "error".into()
+                            } else if trimmed.contains("confirm") || trimmed.contains("approve") {
+                                "needs_approval".into()
+                            } else if trimmed.contains("done") || trimmed.contains("pass") {
+                                "done".into()
+                            } else {
+                                "busy".into()
+                            },
+                            action: Some("raw_input".into()),
+                            message: Some(trimmed.to_string()),
+                            source: Some("windows_pipe".into()),
+                            timestamp: std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .unwrap_or_default()
+                                .as_secs(),
+                        };
+                        let _ = handle.emit("husk-event", &fallback);
+                    }
                 }
             }
         });

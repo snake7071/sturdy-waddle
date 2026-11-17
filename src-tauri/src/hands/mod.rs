@@ -470,9 +470,14 @@ impl OsController for WindowsOsController {
 
     async fn open_url(&self, url: &str) -> Result<(), String> {
         let trimmed = url.trim();
-        Command::new("cmd")
-            .args(["/c", "start", "", trimmed])
-            .spawn()
+        let mut cmd = Command::new("cmd");
+        cmd.args(["/c", "start", "", trimmed]);
+        #[cfg(target_os = "windows")]
+        {
+            use std::os::windows::process::CommandExt;
+            cmd.creation_flags(0x08000000);
+        }
+        cmd.spawn()
             .map_err(|e| format!("Failed to open URL via Windows start: {}", e))?;
         Ok(())
     }
@@ -538,6 +543,11 @@ impl OsController for WindowsOsController {
                 let mut cmd = Command::new("cmd");
                 cmd.args(["/c", "start", "", target]);
                 cmd.args(args);
+                #[cfg(target_os = "windows")]
+                {
+                    use std::os::windows::process::CommandExt;
+                    cmd.creation_flags(0x08000000);
+                }
                 if cmd.spawn().is_ok() {
                     return Ok(());
                 }
@@ -548,6 +558,11 @@ impl OsController for WindowsOsController {
         let mut cmd = Command::new("cmd");
         cmd.args(["/c", "start", "", clean]);
         cmd.args(args);
+        #[cfg(target_os = "windows")]
+        {
+            use std::os::windows::process::CommandExt;
+            cmd.creation_flags(0x08000000);
+        }
         cmd.spawn().map_err(|e| format!("Failed to start '{}' on Windows: {}", clean, e))?;
         Ok(())
     }
@@ -555,6 +570,11 @@ impl OsController for WindowsOsController {
     async fn execute_shell(&self, command_str: &str, cwd: Option<&str>) -> Result<ExecutionResult, String> {
         let mut cmd = Command::new("powershell.exe");
         cmd.args(["-NoProfile", "-Command", command_str]);
+        #[cfg(target_os = "windows")]
+        {
+            use std::os::windows::process::CommandExt;
+            cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+        }
         if let Some(dir) = cwd {
             cmd.current_dir(dir);
         }
@@ -738,5 +758,14 @@ mod tests {
     fn test_default_terminal_detection() {
         let term = LinuxOsController::detect_default_terminal();
         println!("Detected system default terminal: {:?}", term);
+    }
+
+    #[test]
+    fn test_windows_controller_instantiation() {
+        let store = Arc::new(MemoryStore::new(":memory:").expect("sqlite in-memory"));
+        let win_ctrl = WindowsOsController { memory_store: store };
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let geom = rt.block_on(win_ctrl.get_active_window()).unwrap();
+        assert_eq!(geom.id, "win-focused");
     }
 }

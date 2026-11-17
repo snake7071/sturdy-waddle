@@ -273,8 +273,8 @@ pub fn run() {
 
             if let Some(mascot) = app.get_webview_window("mascot") {
                 let _ = mascot.set_size(tauri::Size::Logical(tauri::LogicalSize {
-                    width: 320.0,
-                    height: 400.0,
+                    width: 380.0,
+                    height: 520.0,
                 }));
             }
 
