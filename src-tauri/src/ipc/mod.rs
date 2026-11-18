@@ -41,6 +41,9 @@ pub struct IndexSummary {
 pub struct AppState {
     pub os_controller: Arc<dyn OsController>,
     pub memory_store: Arc<MemoryStore>,
+    /// Holds a draw-on-screen payload that was emitted before the overlay WebView finished
+    /// loading. The overlay fetches and clears this on mount so the first annotation is never lost.
+    pub pending_annotation: Arc<std::sync::Mutex<Option<serde_json::Value>>>,
 }
 
 #[tauri::command]
@@ -173,7 +176,26 @@ pub async fn set_window_clickthrough(
     window: Window,
     ignore_cursor: bool,
 ) -> Result<(), String> {
+    if !window.is_visible().unwrap_or(false) {
+        return Ok(());
+    }
     window
         .set_ignore_cursor_events(ignore_cursor)
         .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_permission_mode(
+    state: State<'_, AppState>,
+) -> Result<crate::hands::PermissionMode, String> {
+    Ok(state.os_controller.get_permission_mode())
+}
+
+#[tauri::command]
+pub async fn set_permission_mode(
+    mode: crate::hands::PermissionMode,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    state.os_controller.set_permission_mode(mode);
+    Ok(())
 }

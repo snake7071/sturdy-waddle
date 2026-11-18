@@ -32,4 +32,10 @@ export interface BrainProvider {
     commandExecutor?: CommandExecutor,
     onThinking?: (thoughtText: string) => void
   ): Promise<SendPromptResult>;
+
+  /** Clears short-term conversational memory */
+  clearHistory?(): void;
+
+  /** Synchronizes conversational memory with recent messages from chat history */
+  syncHistory?(messages: Array<{ role: "user" | "companion"; text: string }>): void;
 }

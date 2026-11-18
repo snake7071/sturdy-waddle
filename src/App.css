@@ -11,3 +11,19 @@ body,
   overflow: hidden;
   user-select: none;
 }
+
+@keyframes sao-draw-fade-in {
+  from {
+    opacity: 0;
+    transform: scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.animate-sao-draw {
+  animation: sao-draw-fade-in 0.22s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  transform-origin: center;
+}

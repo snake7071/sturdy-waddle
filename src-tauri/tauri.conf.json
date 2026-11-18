@@ -41,6 +41,19 @@
         "transparent": false,
         "alwaysOnTop": false,
         "visible": false
+      },
+      {
+        "label": "overlay",
+        "title": "Screen Annotation Overlay",
+        "url": "index.html?window=overlay",
+        "transparent": true,
+        "decorations": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "shadow": false,
+        "visible": false,
+        "focusable": false,
+        "fullscreen": true
       }
     ],
     "security": {

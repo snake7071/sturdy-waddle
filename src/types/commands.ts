@@ -4,12 +4,17 @@
  */
 
 import { GEMINI_TOOLS } from "../brain/tools";
+import { DrawOnScreenPayload } from "./annotations";
+
+export * from "./annotations";
 
 // ============================================================================
 // System Command Contracts (Native Tool Schema for Gemini Function Calling)
 // ============================================================================
 
 export type SecurityLevel = "safe" | "destructive" | "requires_approval";
+
+export type PermissionMode = "safe" | "ask" | "full";
 
 export interface BaseCommand {
   id: string;
@@ -119,6 +124,17 @@ export interface HideCompanionCommand extends BaseCommand {
   };
 }
 
+export interface DrawOnScreenCommand extends BaseCommand {
+  type: "draw_on_screen";
+  securityLevel: "safe";
+  payload: DrawOnScreenPayload;
+}
+
+export interface ClearScreenAnnotationsCommand extends BaseCommand {
+  type: "clear_screen_annotations";
+  securityLevel: "safe";
+}
+
 export type CompanionCommand =
   | OpenUrlCommand
   | LaunchAppCommand
@@ -130,7 +146,9 @@ export type CompanionCommand =
   | SetTimerCommand
   | SaveMemoryCommand
   | HideCompanionCommand
-  | MemoryCompactionCommand;
+  | MemoryCompactionCommand
+  | DrawOnScreenCommand
+  | ClearScreenAnnotationsCommand;
 
 // ============================================================================
 // Tool Calling Schema Declaration for Google GenAI SDK
@@ -152,38 +170,7 @@ export interface CommandExecutionResult {
 
 export function isDestructiveCommand(command: CompanionCommand): boolean {
   if (command.type === "execute_shell") {
-    const cmd = (command.payload.command || "").trim();
-    // Commands that modify system state, delete files, reboot or write require approval
-    const destructivePatterns = [
-      /\brm(\s+|$)/i,
-      /\brmdir(\s+|$)/i,
-      /\bmv(\s+|$)/i,
-      /\btruncate(\s+|$)/i,
-      /\bdd(\s+|$)/i,
-      /\bkill(\s+|$)/i,
-      /\bpkill(\s+|$)/i,
-      /\bkillall(\s+|$)/i,
-      /\bchmod(\s+|$)/i,
-      /\bchown(\s+|$)/i,
-      /\bsudo(\s+|$)/i,
-      /\bdoas(\s+|$)/i,
-      /\breboot(\s+|$)/i,
-      /\bshutdown(\s+|$)/i,
-      /\bpoweroff(\s+|$)/i,
-      /\bmkfs(\s+|$)/i,
-      /\bfdisk(\s+|$)/i,
-      /\bparted(\s+|$)/i,
-      /\bcurl\b.*\|.*\b(sh|bash|zsh)\b/i,
-      /\bwget\b.*\|.*\b(sh|bash|zsh)\b/i,
-      />{1,2}/, // Redirection writing or appending to files
-      /\btee(\s+|$)/i,
-      /\bsed\s+-[a-zA-Z]*i/i,
-    ];
-    if (destructivePatterns.some((pattern) => pattern.test(cmd))) {
-      return true;
-    }
-    // Safe read-only inspection commands (find, ls, grep, cat, which, whereis, df, ps, etc.) run automatically
-    return false;
+    return true;
   }
   if (
     command.type === "file_operation" &&

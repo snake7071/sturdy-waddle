@@ -4,14 +4,14 @@
  * Dark Smoked Glass SAO Aincrad HUD Aesthetic
  */
 
-import React, { useEffect, useState, useRef } from "react";
+import React, { useEffect, useState, useRef, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { emit, listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { AvatarStateMachine, AvatarState, StateContext } from "../engine/AvatarStateMachine";
 import { MascotSpriteRenderer } from "../engine/MascotSpriteRenderer";
 import { UnifiedBrain } from "../brain";
-import { CompanionCommand, isDestructiveCommand } from "../types/commands";
+import { CompanionCommand, isDestructiveCommand, PermissionMode } from "../types/commands";
 
 export interface ChatHistoryMessage {
   id: string;
@@ -45,6 +45,53 @@ export const MascotWindow: React.FC = () => {
     }
   });
   const historyEndRef = useRef<HTMLDivElement | null>(null);
+  const [hasActiveAnnotations, setHasActiveAnnotations] = useState(false);
+  const hasActiveAnnotationsRef = useRef(false);
+  const annotationTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Control rail visibility: hidden while idle so only the mascot sprite is on screen;
+  // revealed on hover over the sprite or whenever a panel/annotation is active.
+  const [showControls, setShowControls] = useState(false);
+  const controlsHideTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const showControlsNow = useCallback(() => {
+    if (controlsHideTimeoutRef.current) {
+      clearTimeout(controlsHideTimeoutRef.current);
+      controlsHideTimeoutRef.current = null;
+    }
+    setShowControls(true);
+  }, []);
+
+  const scheduleHideControls = useCallback(() => {
+    if (controlsHideTimeoutRef.current) {
+      clearTimeout(controlsHideTimeoutRef.current);
+    }
+    controlsHideTimeoutRef.current = setTimeout(() => {
+      setShowControls(false);
+    }, 250);
+  }, []);
+
+  const updateHasActiveAnnotations = useCallback((active: boolean) => {
+    hasActiveAnnotationsRef.current = active;
+    setHasActiveAnnotations(active);
+  }, []);
+
+  const handleClearAnnotations = useCallback(async () => {
+    try {
+      await invoke("clear_screen_annotations");
+      updateHasActiveAnnotations(false);
+      if (annotationTimeoutRef.current) {
+        clearTimeout(annotationTimeoutRef.current);
+        annotationTimeoutRef.current = null;
+      }
+    } catch (err) {
+      console.warn("Failed to clear screen annotations:", err);
+    }
+  }, [updateHasActiveAnnotations]);
+
+  const [permissionMode, setPermissionMode] = useState<PermissionMode>(() => {
+    const saved = localStorage.getItem("companion_permission_mode");
+    return saved === "safe" || saved === "full" ? saved : "ask";
+  });
   const [pendingApproval, setPendingApproval] = useState<{
     command: CompanionCommand;
     resolve: (res: { success: boolean; output: string }) => void;
@@ -78,10 +125,15 @@ export const MascotWindow: React.FC = () => {
 
   useEffect(() => {
     brainRef.current = new UnifiedBrain(
-      {},
+      { permissionMode },
       (_summary) => {
         fsm.triggerMemoryCompaction();
       }
+    );
+
+    // Sync active permission mode with Rust backend on mount
+    invoke("set_permission_mode", { mode: permissionMode }).catch((err) =>
+      console.warn("[MascotWindow] Could not sync permission mode to backend:", err)
     );
 
     invoke<any>("get_system_context")
@@ -106,6 +158,20 @@ export const MascotWindow: React.FC = () => {
       fsm.handleHuskEvent(event.payload);
     });
 
+    const unlistenPermissionPromise = listen<PermissionMode>(
+      "permission-mode-changed",
+      (event) => {
+        if (event.payload) {
+          setPermissionMode(event.payload);
+          brainRef.current?.setPermissionMode(event.payload);
+        }
+      }
+    );
+
+    const unlistenClearAnnotationsPromise = listen("clear-screen-annotations", () => {
+      updateHasActiveAnnotations(false);
+    });
+
     const unlistenHistoryPromise = listen("toggle-history", () => {
       setIsHistoryOpen((prev) => !prev);
     });
@@ -121,6 +187,9 @@ export const MascotWindow: React.FC = () => {
         e.preventDefault();
         invoke("open_devtools").catch((err) => console.error("Failed to open devtools:", err));
       } else if (e.key === "Escape") {
+        if (hasActiveAnnotationsRef.current) {
+          handleClearAnnotations();
+        }
         setIsInputOpen(false);
         setIsHistoryOpen(false);
       }
@@ -130,17 +199,35 @@ export const MascotWindow: React.FC = () => {
     return () => {
       unsubscribe();
       unlistenPromise.then((f) => f());
+      unlistenPermissionPromise.then((f) => f());
+      unlistenClearAnnotationsPromise.then((f) => f());
       unlistenHistoryPromise.then((f) => f());
       unlistenScalePromise.then((f) => f());
       window.removeEventListener("keydown", handleKeyDown);
+      if (annotationTimeoutRef.current) {
+        clearTimeout(annotationTimeoutRef.current);
+      }
+      if (controlsHideTimeoutRef.current) {
+        clearTimeout(controlsHideTimeoutRef.current);
+      }
       brainRef.current?.destroy();
     };
-  }, [fsm]);
+  }, [fsm, handleClearAnnotations]);
 
   const handleSendPrompt = async () => {
     if (!inputText.trim()) return;
     const prompt = inputText.trim();
-    const useVision = isVisionMode;
+    let useVision = isVisionMode;
+    if (!useVision) {
+      // Auto-detect visual queries so the user doesn't have to manually toggle Vision Mode every single time
+      const isVisualQuery =
+        /(видишь|на экране|покажи|где|обведи|найди|вкладк|кнопк|окно|скрин|экран|посмотри|глянь|вторая|третья|первая|квадрат|круг|стрелк)/i.test(
+          prompt
+        );
+      if (isVisualQuery) {
+        useVision = true;
+      }
+    }
     setInputText("");
     setIsInputOpen(false);
     setIsVisionMode(false);
@@ -227,13 +314,32 @@ export const MascotWindow: React.FC = () => {
   const handleCommandDispatch = async (
     command: CompanionCommand
   ): Promise<{ success: boolean; output: string }> => {
-    if (isDestructiveCommand(command)) {
-      return new Promise<{ success: boolean; output: string }>((resolve) => {
-        setPendingApproval({ command, resolve });
-        fsm.triggerNeedsApproval("Действие требует подтверждения!");
-      });
+    // 1. Safe Mode: Strictly block shell execution and destructive operations
+    if (permissionMode === "safe") {
+      if (command.type === "execute_shell" || isDestructiveCommand(command)) {
+        fsm.triggerError("Действие заблокировано: в режиме Safe выполнение команд отключено.", 4000);
+        return {
+          success: false,
+          output: "Error: Permission denied. Shell execution and destructive operations are strictly disabled in 'safe' permission mode.",
+        };
+      }
     }
 
+    // 2. Ask Mode (Default): shell commands and destructive actions trigger needs_approval
+    if (permissionMode === "ask") {
+      if (command.type === "execute_shell" || isDestructiveCommand(command)) {
+        return new Promise<{ success: boolean; output: string }>((resolve) => {
+          setPendingApproval({ command, resolve });
+          const desc =
+            command.type === "execute_shell"
+              ? (command.payload.explanation || command.payload.command)
+              : "Действие требует подтверждения!";
+          fsm.triggerNeedsApproval(`Требуется подтверждение: ${desc}`);
+        });
+      }
+    }
+
+    // 3. Full Mode (or harmless commands in safe/ask mode): execute immediately without confirmation!
     const taskDescription =
       command.type === "launch_app"
         ? `Запускаю ${command.payload.appName || "программу"}...`
@@ -241,6 +347,10 @@ export const MascotWindow: React.FC = () => {
         ? "Открываю ссылку..."
         : command.type === "save_memory"
         ? "Запоминаю факт..."
+        : command.type === "draw_on_screen"
+        ? "Рисую на экране..."
+        : command.type === "clear_screen_annotations"
+        ? "Очищаю экран..."
         : command.type === "execute_shell"
         ? "Выполняю команду..."
         : "Выполняю задачу...";
@@ -308,28 +418,35 @@ export const MascotWindow: React.FC = () => {
           output: `Memory successfully recorded in SQLite: [${command.payload.category}] ${command.payload.key}`,
         };
       } else if (command.type === "execute_shell") {
-        const res: any = await invoke("execute_sandboxed_shell", {
-          command: command.payload.command,
-          cwd: command.payload.cwd,
-        });
-        const stdout = (res.stdout || "").trim();
-        const stderr = (res.stderr || "").trim();
-        let formattedOutput = "";
-        if (stdout && stderr) {
-          formattedOutput = `stdout:\n${stdout}\nstderr:\n${stderr}`;
-        } else if (stdout) {
-          formattedOutput = stdout;
-        } else if (stderr) {
-          formattedOutput = `stderr: ${stderr}`;
-        } else {
-          formattedOutput = res.success
-            ? "(Команда выполнена успешно, вывод пуст)"
-            : "(Ошибка выполнения команды)";
+        try {
+          const res: any = await invoke("execute_sandboxed_shell", {
+            command: command.payload.command,
+            cwd: command.payload.cwd,
+          });
+          const stdout = (res.stdout || "").trim();
+          const stderr = (res.stderr || "").trim();
+          let formattedOutput = "";
+          if (stdout && stderr) {
+            formattedOutput = `stdout:\n${stdout}\nstderr:\n${stderr}`;
+          } else if (stdout) {
+            formattedOutput = stdout;
+          } else if (stderr) {
+            formattedOutput = `stderr: ${stderr}`;
+          } else {
+            formattedOutput = res.success
+              ? "(Команда выполнена успешно, вывод пуст)"
+              : "(Ошибка выполнения команды)";
+          }
+          return {
+            success: res.success,
+            output: formattedOutput,
+          };
+        } catch (err: any) {
+          return {
+            success: false,
+            output: `stderr: ${err?.message || err}`,
+          };
         }
-        return {
-          success: res.success,
-          output: formattedOutput,
-        };
       } else if (command.type === "hide_companion") {
         const farewell = "Хорошо, скрываюсь! Нажмите на иконку в трее или горячую клавишу, чтобы вернуть меня.";
         appendToHistory("companion", farewell);
@@ -343,6 +460,39 @@ export const MascotWindow: React.FC = () => {
           }
         }, 1200);
         return { success: true, output: "Companion mascot hidden into tray." };
+      } else if (command.type === "draw_on_screen") {
+        try {
+          await invoke("draw_on_screen", { payload: command.payload });
+          updateHasActiveAnnotations(true);
+          const duration =
+            typeof command.payload.durationSeconds === "number" && command.payload.durationSeconds > 0
+              ? command.payload.durationSeconds
+              : 6;
+
+          if (annotationTimeoutRef.current) {
+            clearTimeout(annotationTimeoutRef.current);
+          }
+          annotationTimeoutRef.current = setTimeout(() => {
+            updateHasActiveAnnotations(false);
+          }, (duration + 1) * 1000);
+
+          const count = command.payload.shapes?.length || 1;
+          return {
+            success: true,
+            output: `Visual annotation (${count} shape(s)) drawn on screen for ${duration}s.`,
+          };
+        } catch (err: any) {
+          return {
+            success: false,
+            output: `Failed to draw on screen: ${err?.message || err}`,
+          };
+        }
+      } else if (command.type === "clear_screen_annotations") {
+        await handleClearAnnotations();
+        return {
+          success: true,
+          output: "Active screen annotations dismissed.",
+        };
       }
       return { success: false, output: `Unknown command type: ${command.type}` };
     } catch (e: any) {
@@ -444,6 +594,20 @@ export const MascotWindow: React.FC = () => {
         invoke("open_devtools").catch((err) => console.error("Failed to open devtools:", err));
       }}
     >
+      {/* Quick Dismiss Screen Annotations Pill */}
+      {hasActiveAnnotations && !context.speechBubbleText && (
+        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-50 pointer-events-auto animate-sao-draw">
+          <button
+            onClick={handleClearAnnotations}
+            className="flex items-center gap-1.5 px-3 py-1 rounded-sm bg-[#141722]/95 border border-[#EBA821]/40 border-l-2 border-l-[#EBA821] text-[#EBA821] hover:bg-[#141722] text-[10px] font-mono font-bold tracking-wider shadow-xl backdrop-blur-md transition-all active:scale-95"
+            title="Очистить экранные аннотации (Esc)"
+          >
+            <span className="w-1.5 h-1.5 rotate-45 bg-[#EBA821] animate-pulse" />
+            <span>CLEAR DRAW (ESC)</span>
+          </button>
+        </div>
+      )}
+
       {/* =========================================================================
           SAO Notification Plate (Speech Bubble)
           Smoked Obsidian Glass with SAO Status Gauge Top Bar
@@ -505,6 +669,19 @@ export const MascotWindow: React.FC = () => {
                     title="Закрыть сообщение"
                   >
                     ✕
+                  </button>
+                )}
+
+                {hasActiveAnnotations && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleClearAnnotations();
+                    }}
+                    className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-mono font-bold bg-[#EBA821]/20 text-[#EBA821] hover:bg-[#EBA821]/30 border border-[#EBA821]/40 transition-all active:scale-95"
+                    title="Очистить рисунки на экране (Esc)"
+                  >
+                    <span>CLEAR DRAW</span>
                   </button>
                 )}
               </div>
@@ -570,7 +747,12 @@ export const MascotWindow: React.FC = () => {
       {/* =========================================================================
           Mascot Sprite Overlay (Direct Desktop Floating Character)
           ========================================================================= */}
-      <div className="shrink-0 relative pointer-events-auto z-10" data-tauri-drag-region>
+      <div
+        className="shrink-0 relative pointer-events-auto z-10"
+        data-tauri-drag-region
+        onMouseEnter={showControlsNow}
+        onMouseLeave={scheduleHideControls}
+      >
         <MascotSpriteRenderer state={avatarState} scale={mascotScale} />
       </div>
 
@@ -578,7 +760,15 @@ export const MascotWindow: React.FC = () => {
           SAO Side Action Rail (Vertical Medallion Stack)
           Floats cleanly on the side, slides out sleek ribbons on hover
           ========================================================================= */}
-      <div className="absolute right-2 bottom-6 flex flex-col gap-2.5 pointer-events-auto z-40">
+      <div
+        className={`absolute right-2 bottom-6 flex flex-col gap-2.5 z-40 transition-opacity duration-200 ${
+          showControls || isInputOpen || isHistoryOpen || hasActiveAnnotations
+            ? "opacity-100 pointer-events-auto"
+            : "opacity-0 pointer-events-none"
+        }`}
+        onMouseEnter={showControlsNow}
+        onMouseLeave={scheduleHideControls}
+      >
         {/* Action 1: Chat Toggle */}
         <div className="group/rail relative flex items-center justify-end">
           <div
@@ -733,6 +923,7 @@ export const MascotWindow: React.FC = () => {
                 <button
                   onClick={() => {
                     setChatHistory([]);
+                    brainRef.current?.clearHistory?.();
                     try {
                       localStorage.removeItem("companion_chat_history");
                     } catch {}
@@ -817,6 +1008,20 @@ export const MascotWindow: React.FC = () => {
             </svg>
           </button>
 
+          {hasActiveAnnotations && (
+            <button
+              type="button"
+              onClick={handleClearAnnotations}
+              className="p-1.5 rounded transition-all select-none text-[#EBA821] hover:bg-[#EBA821]/20 border border-[#EBA821]/30"
+              title="Очистить экранные аннотации"
+              aria-label="Clear Screen Drawings"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          )}
+
           <input
             type="text"
             value={inputText}
@@ -883,9 +1088,9 @@ export const MascotWindow: React.FC = () => {
                 item.resolve(res);
                 fsm.transition("idle");
               }}
-              className="px-3.5 py-1 bg-[#D94848] hover:bg-[#c23b3b] text-white font-bold rounded text-[11px] transition-colors shadow-sm"
+              className="px-3.5 py-1 bg-[#EBA821] hover:bg-[#d89619] text-[#12141A] font-bold rounded text-[11px] transition-colors shadow-sm"
             >
-              Confirm
+              Allow
             </button>
           </div>
         </div>

@@ -6,6 +6,7 @@
 import { useMemo } from "react";
 import { MascotWindow } from "./mascot/MascotWindow";
 import { DashboardWindow } from "./dashboard/DashboardWindow";
+import { OverlayWindow } from "./overlay/OverlayWindow";
 import "./App.css";
 
 export function App() {
@@ -16,6 +17,10 @@ export function App() {
 
   if (windowType === "dashboard") {
     return <DashboardWindow />;
+  }
+
+  if (windowType === "overlay") {
+    return <OverlayWindow />;
   }
 
   return <MascotWindow />;

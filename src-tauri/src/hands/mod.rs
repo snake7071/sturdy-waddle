@@ -13,7 +13,43 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PermissionMode {
+    Safe,
+    Ask,
+    Full,
+}
+
+impl Default for PermissionMode {
+    fn default() -> Self {
+        PermissionMode::Ask
+    }
+}
+
+impl std::fmt::Display for PermissionMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            PermissionMode::Safe => write!(f, "safe"),
+            PermissionMode::Ask => write!(f, "ask"),
+            PermissionMode::Full => write!(f, "full"),
+        }
+    }
+}
+
+impl std::str::FromStr for PermissionMode {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.trim().to_lowercase().as_str() {
+            "safe" => Ok(PermissionMode::Safe),
+            "ask" => Ok(PermissionMode::Ask),
+            "full" => Ok(PermissionMode::Full),
+            other => Err(format!("Unknown permission mode: '{}'", other)),
+        }
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WindowGeometry {
@@ -59,6 +95,12 @@ pub trait OsController: Send + Sync {
 
     /// Executes shell command in a sandboxed/audited environment
     async fn execute_shell(&self, command: &str, cwd: Option<&str>) -> Result<ExecutionResult, String>;
+
+    /// Updates the active security permission mode (safe, ask, full)
+    fn set_permission_mode(&self, mode: PermissionMode);
+
+    /// Retrieves the current security permission mode
+    fn get_permission_mode(&self) -> PermissionMode;
 }
 
 /// Type alias reflecting the clean platform abstraction architecture
@@ -68,19 +110,19 @@ pub type PlatformAdapter = dyn OsController;
 pub fn create_os_controller(memory_store: Arc<MemoryStore>) -> Arc<dyn OsController> {
     #[cfg(target_os = "linux")]
     {
-        Arc::new(LinuxOsController { memory_store })
+        Arc::new(LinuxOsController::new(memory_store))
     }
     #[cfg(target_os = "windows")]
     {
-        Arc::new(WindowsOsController { memory_store })
+        Arc::new(WindowsOsController::new(memory_store))
     }
     #[cfg(target_os = "macos")]
     {
-        Arc::new(MacOsController { memory_store })
+        Arc::new(MacOsController::new(memory_store))
     }
     #[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "macos")))]
     {
-        Arc::new(LinuxOsController { memory_store })
+        Arc::new(LinuxOsController::new(memory_store))
     }
 }
 
@@ -90,11 +132,19 @@ pub fn create_os_controller(memory_store: Arc<MemoryStore>) -> Arc<dyn OsControl
 
 #[cfg(any(target_os = "linux", not(any(target_os = "windows", target_os = "macos"))))]
 pub struct LinuxOsController {
-    memory_store: Arc<MemoryStore>,
+    pub memory_store: Arc<MemoryStore>,
+    pub permission_mode: Arc<RwLock<PermissionMode>>,
 }
 
 #[cfg(any(target_os = "linux", not(any(target_os = "windows", target_os = "macos"))))]
 impl LinuxOsController {
+    pub fn new(memory_store: Arc<MemoryStore>) -> Self {
+        Self {
+            memory_store,
+            permission_mode: Arc::new(RwLock::new(PermissionMode::default())),
+        }
+    }
+
     /// Discovers the system's default terminal emulator using standard specifications:
     /// 1. $TERMINAL environment variable (POSIX/Freedesktop standard)
     /// 2. xdg-terminal-exec (Freedesktop specification)
@@ -428,7 +478,28 @@ impl OsController for LinuxOsController {
         Ok(())
     }
 
+    fn set_permission_mode(&self, mode: PermissionMode) {
+        if let Ok(mut lock) = self.permission_mode.write() {
+            *lock = mode;
+        }
+    }
+
+    fn get_permission_mode(&self) -> PermissionMode {
+        self.permission_mode
+            .read()
+            .map(|l| *l)
+            .unwrap_or(PermissionMode::Ask)
+    }
+
     async fn execute_shell(&self, command_str: &str, cwd: Option<&str>) -> Result<ExecutionResult, String> {
+        if self.get_permission_mode() == PermissionMode::Safe {
+            return Ok(ExecutionResult {
+                success: false,
+                stdout: String::new(),
+                stderr: "Permission denied: Shell execution is disabled in 'safe' permission mode.".to_string(),
+            });
+        }
+
         let mut cmd = Command::new("sh");
         cmd.arg("-c").arg(command_str);
 
@@ -452,10 +523,33 @@ impl OsController for LinuxOsController {
 #[allow(dead_code)]
 pub struct WindowsOsController {
     pub memory_store: Arc<MemoryStore>,
+    pub permission_mode: Arc<RwLock<PermissionMode>>,
+}
+
+#[allow(dead_code)]
+impl WindowsOsController {
+    pub fn new(memory_store: Arc<MemoryStore>) -> Self {
+        Self {
+            memory_store,
+            permission_mode: Arc::new(RwLock::new(PermissionMode::default())),
+        }
+    }
 }
 
 #[async_trait]
 impl OsController for WindowsOsController {
+    fn set_permission_mode(&self, mode: PermissionMode) {
+        if let Ok(mut lock) = self.permission_mode.write() {
+            *lock = mode;
+        }
+    }
+
+    fn get_permission_mode(&self) -> PermissionMode {
+        self.permission_mode
+            .read()
+            .map(|l| *l)
+            .unwrap_or(PermissionMode::Ask)
+    }
     async fn get_active_window(&self) -> Result<WindowGeometry, String> {
         Ok(WindowGeometry {
             id: "win-focused".into(),
@@ -568,6 +662,14 @@ impl OsController for WindowsOsController {
     }
 
     async fn execute_shell(&self, command_str: &str, cwd: Option<&str>) -> Result<ExecutionResult, String> {
+        if self.get_permission_mode() == PermissionMode::Safe {
+            return Ok(ExecutionResult {
+                success: false,
+                stdout: String::new(),
+                stderr: "Permission denied: Shell execution is disabled in 'safe' permission mode.".to_string(),
+            });
+        }
+
         let mut cmd = Command::new("powershell.exe");
         cmd.args(["-NoProfile", "-Command", command_str]);
         #[cfg(target_os = "windows")]
@@ -594,10 +696,33 @@ impl OsController for WindowsOsController {
 #[allow(dead_code)]
 pub struct MacOsController {
     pub memory_store: Arc<MemoryStore>,
+    pub permission_mode: Arc<RwLock<PermissionMode>>,
+}
+
+#[allow(dead_code)]
+impl MacOsController {
+    pub fn new(memory_store: Arc<MemoryStore>) -> Self {
+        Self {
+            memory_store,
+            permission_mode: Arc::new(RwLock::new(PermissionMode::default())),
+        }
+    }
 }
 
 #[async_trait]
 impl OsController for MacOsController {
+    fn set_permission_mode(&self, mode: PermissionMode) {
+        if let Ok(mut lock) = self.permission_mode.write() {
+            *lock = mode;
+        }
+    }
+
+    fn get_permission_mode(&self) -> PermissionMode {
+        self.permission_mode
+            .read()
+            .map(|l| *l)
+            .unwrap_or(PermissionMode::Ask)
+    }
     async fn get_active_window(&self) -> Result<WindowGeometry, String> {
         let script = r#"
             tell application "System Events"
@@ -734,6 +859,14 @@ impl OsController for MacOsController {
     }
 
     async fn execute_shell(&self, command_str: &str, cwd: Option<&str>) -> Result<ExecutionResult, String> {
+        if self.get_permission_mode() == PermissionMode::Safe {
+            return Ok(ExecutionResult {
+                success: false,
+                stdout: String::new(),
+                stderr: "Permission denied: Shell execution is disabled in 'safe' permission mode.".to_string(),
+            });
+        }
+
         let mut cmd = Command::new("zsh");
         cmd.arg("-c").arg(command_str);
         if let Some(dir) = cwd {
@@ -763,7 +896,7 @@ mod tests {
     #[test]
     fn test_windows_controller_instantiation() {
         let store = Arc::new(MemoryStore::new(":memory:").expect("sqlite in-memory"));
-        let win_ctrl = WindowsOsController { memory_store: store };
+        let win_ctrl = WindowsOsController::new(store);
         let rt = tokio::runtime::Runtime::new().unwrap();
         let geom = rt.block_on(win_ctrl.get_active_window()).unwrap();
         assert_eq!(geom.id, "win-focused");
@@ -772,9 +905,49 @@ mod tests {
     #[test]
     fn test_macos_controller_instantiation() {
         let store = Arc::new(MemoryStore::new(":memory:").expect("sqlite in-memory"));
-        let mac_ctrl = MacOsController { memory_store: store };
+        let mac_ctrl = MacOsController::new(store);
         let rt = tokio::runtime::Runtime::new().unwrap();
         let geom = rt.block_on(mac_ctrl.get_active_window()).unwrap();
         assert!(!geom.id.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_permission_mode_safe_blocks_execute_shell() {
+        let store = Arc::new(MemoryStore::new(":memory:").expect("sqlite in-memory"));
+        let ctrl = LinuxOsController::new(store);
+
+        // Default is Ask
+        assert_eq!(ctrl.get_permission_mode(), PermissionMode::Ask);
+
+        // Switch to Safe
+        ctrl.set_permission_mode(PermissionMode::Safe);
+        assert_eq!(ctrl.get_permission_mode(), PermissionMode::Safe);
+
+        // execute_shell should be rejected immediately with structured error
+        let res = ctrl.execute_shell("echo 'hello'", None).await.unwrap();
+        assert!(!res.success);
+        assert!(res.stderr.contains("Permission denied"));
+        assert!(res.stderr.contains("safe"));
+
+        // Switch to Full
+        ctrl.set_permission_mode(PermissionMode::Full);
+        assert_eq!(ctrl.get_permission_mode(), PermissionMode::Full);
+        let res_full = ctrl.execute_shell("echo 'hello world'", None).await.unwrap();
+        assert!(res_full.success);
+        assert_eq!(res_full.stdout.trim(), "hello world");
+    }
+
+    #[test]
+    fn test_permission_mode_serde_and_parsing() {
+        use std::str::FromStr;
+        assert_eq!(PermissionMode::from_str("safe").unwrap(), PermissionMode::Safe);
+        assert_eq!(PermissionMode::from_str("ask").unwrap(), PermissionMode::Ask);
+        assert_eq!(PermissionMode::from_str("full").unwrap(), PermissionMode::Full);
+        assert!(PermissionMode::from_str("invalid").is_err());
+
+        let json = serde_json::to_string(&PermissionMode::Safe).unwrap();
+        assert_eq!(json, "\"safe\"");
+        let parsed: PermissionMode = serde_json::from_str("\"full\"").unwrap();
+        assert_eq!(parsed, PermissionMode::Full);
     }
 }

@@ -45,11 +45,21 @@ pub fn capture_screen_snapshot() -> Result<String, String> {
 
     let dyn_image = DynamicImage::ImageRgba8(frame);
 
-    // 4. Optimization: Downscale so longest edge is max 1080p preserving aspect ratio
+    // 4. Optimization: Downscale so the longest edge is max 1080p, preserving aspect ratio.
+    // NOTE: using imageops::resize(max_edge, max_edge, ..) here would squash the frame into a
+    // square and distort the aspect ratio, which in turn makes the LLM misjudge element positions
+    // and sizes when drawing annotations. We compute proportional dimensions instead.
     let (width, height) = (dyn_image.width(), dyn_image.height());
-    let max_edge = 1080;
-    let resized = if width > max_edge || height > max_edge {
-        dyn_image.resize(max_edge, max_edge, FilterType::Triangle)
+    let max_edge = 1080.0;
+    let resized = if (width as f32) > max_edge || (height as f32) > max_edge {
+        let scale = if width >= height {
+            max_edge / width as f32
+        } else {
+            max_edge / height as f32
+        };
+        let new_w = ((width as f32 * scale).round() as u32).max(1);
+        let new_h = ((height as f32 * scale).round() as u32).max(1);
+        dyn_image.resize_exact(new_w, new_h, FilterType::Triangle)
     } else {
         dyn_image
     };

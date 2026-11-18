@@ -84,6 +84,84 @@ fn quit_app(app: tauri::AppHandle) {
 }
 
 #[tauri::command]
+fn hide_overlay(app: tauri::AppHandle) -> Result<(), String> {
+    if let Some(overlay) = app.get_webview_window("overlay") {
+        let _ = overlay.hide();
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn draw_on_screen(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    payload: serde_json::Value,
+) -> Result<(), String> {
+    let overlay = if let Some(w) = app.get_webview_window("overlay") {
+        w
+    } else {
+        tauri::WebviewWindowBuilder::new(
+            &app,
+            "overlay",
+            tauri::WebviewUrl::App("index.html?window=overlay".into()),
+        )
+        .title("Screen Annotation Overlay")
+        .transparent(true)
+        .decorations(false)
+        .always_on_top(true)
+        .skip_taskbar(true)
+        .shadow(false)
+        .focusable(false)
+        .fullscreen(true)
+        .visible(false)
+        .build()
+        .map_err(|e| e.to_string())?
+    };
+
+    // Store the payload so the overlay can fetch it on mount, even if the WebView has not
+    // finished loading yet (otherwise the very first draw-on-screen event is silently dropped).
+    if let Ok(mut pending) = state.pending_annotation.lock() {
+        *pending = Some(payload.clone());
+    }
+
+    let _ = overlay.set_fullscreen(true);
+    let _ = overlay.show();
+    let _ = overlay.set_always_on_top(true);
+    let _ = app.emit("draw-on-screen", payload);
+    // Delay set_ignore_cursor_events so the Wayland surface is fully committed,
+    // then refocus the previously-active window via hyprctl.
+    let overlay_clone = overlay.clone();
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+        let _ = overlay_clone.set_ignore_cursor_events(true);
+        let _ = std::process::Command::new("hyprctl")
+            .args(["dispatch", "focuscurrentorlast"])
+            .output();
+    });
+    Ok(())
+}
+
+/// Called once by the overlay window on mount: returns and clears any draw payload that was
+/// emitted before the overlay finished loading. Guarantees the first annotation is rendered.
+#[tauri::command]
+fn take_pending_annotation(state: tauri::State<'_, AppState>) -> Result<Option<serde_json::Value>, String> {
+    let mut pending = state
+        .pending_annotation
+        .lock()
+        .map_err(|e| e.to_string())?;
+    Ok(pending.take())
+}
+
+#[tauri::command]
+fn clear_screen_annotations(app: tauri::AppHandle) -> Result<(), String> {
+    let _ = app.emit("clear-screen-annotations", ());
+    if let Some(overlay) = app.get_webview_window("overlay") {
+        let _ = overlay.hide();
+    }
+    Ok(())
+}
+
+#[tauri::command]
 fn update_global_shortcuts(
     app: tauri::AppHandle,
     shortcuts: HashMap<String, String>,
@@ -153,8 +231,9 @@ fn ensure_hyprland_rules() {
 
     if custom_rules_path.parent().map(|p| p.exists()).unwrap_or(false) {
         let existing = std::fs::read_to_string(&custom_rules_path).unwrap_or_default();
+        let mut companion_rules = String::new();
         if !existing.contains("Companion Mascot") {
-            let companion_rules = r#"
+            companion_rules.push_str(r#"
 -- Companion Window Rules (Wayland / Hyprland)
 hl.window_rule({match = {class = "^(companion)$", title = "^(Companion Mascot)$" }, float = true})
 hl.window_rule({match = {class = "^(companion)$", title = "^(Companion Mascot)$" }, size = { 380, 520 }})
@@ -165,7 +244,22 @@ hl.window_rule({match = {class = "^(companion)$", title = "^(Companion Mascot)$"
 hl.window_rule({match = {class = "^(companion)$", title = "^(Companion Dashboard)$" }, float = true})
 hl.window_rule({match = {class = "^(companion)$", title = "^(Companion Dashboard)$" }, size = { 1000, 720 }})
 hl.window_rule({match = {class = "^(companion)$", title = "^(Companion Dashboard)$" }, center = true})
-"#;
+"#);
+        }
+        if !existing.contains("Screen Annotation Overlay") {
+            companion_rules.push_str(r#"
+-- Screen Annotation Overlay Rules (Transparent, click-through, covering whole screen)
+hl.window_rule({match = {class = "^(companion)$", title = "^(Screen Annotation Overlay)$" }, float = true})
+hl.window_rule({match = {class = "^(companion)$", title = "^(Screen Annotation Overlay)$" }, pin = true})
+hl.window_rule({match = {class = "^(companion)$", title = "^(Screen Annotation Overlay)$" }, no_shadow = true})
+hl.window_rule({match = {class = "^(companion)$", title = "^(Screen Annotation Overlay)$" }, no_blur = true})
+hl.window_rule({match = {class = "^(companion)$", title = "^(Screen Annotation Overlay)$" }, no_focus = true})
+hl.window_rule({match = {class = "^(companion)$", title = "^(Screen Annotation Overlay)$" }, no_initial_focus = true})
+hl.window_rule({match = {class = "^(companion)$", title = "^(Screen Annotation Overlay)$" }, move = {0, 0} })
+hl.window_rule({match = {class = "^(companion)$", title = "^(Screen Annotation Overlay)$" }, size = {"(monitor_w)", "(monitor_h)"} })
+"#);
+        }
+        if !companion_rules.is_empty() {
             let new_content = format!("{}{}", existing, companion_rules);
             if std::fs::write(&custom_rules_path, new_content).is_ok() {
                 should_reload = true;
@@ -175,8 +269,9 @@ hl.window_rule({match = {class = "^(companion)$", title = "^(Companion Dashboard
         let hyprland_conf = home.join(".config/hypr/hyprland.conf");
         if hyprland_conf.exists() {
             let existing = std::fs::read_to_string(&hyprland_conf).unwrap_or_default();
+            let mut companion_rules = String::new();
             if !existing.contains("Companion Mascot") {
-                let companion_rules = r#"
+                companion_rules.push_str(r#"
 # Companion Window Rules (Wayland / Hyprland)
 windowrulev2 = float, class:^(companion)$, title:^(Companion Mascot)$
 windowrulev2 = size 380 520, class:^(companion)$, title:^(Companion Mascot)$
@@ -184,7 +279,21 @@ windowrulev2 = pin, class:^(companion)$, title:^(Companion Mascot)$
 windowrulev2 = float, class:^(companion)$, title:^(Companion Dashboard)$
 windowrulev2 = size 1000 720, class:^(companion)$, title:^(Companion Dashboard)$
 windowrulev2 = center, class:^(companion)$, title:^(Companion Dashboard)$
-"#;
+"#);
+            }
+            if !existing.contains("Screen Annotation Overlay") {
+                companion_rules.push_str(r#"
+windowrulev2 = float, class:^(companion)$, title:^(Screen Annotation Overlay)$
+windowrulev2 = pin, class:^(companion)$, title:^(Screen Annotation Overlay)$
+windowrulev2 = noborder, class:^(companion)$, title:^(Screen Annotation Overlay)$
+windowrulev2 = noshadow, class:^(companion)$, title:^(Screen Annotation Overlay)$
+windowrulev2 = noblur, class:^(companion)$, title:^(Screen Annotation Overlay)$
+windowrulev2 = nofocus, class:^(companion)$, title:^(Screen Annotation Overlay)$
+windowrulev2 = move 0 0, class:^(companion)$, title:^(Screen Annotation Overlay)$
+windowrulev2 = size 100% 100%, class:^(companion)$, title:^(Screen Annotation Overlay)$
+"#);
+            }
+            if !companion_rules.is_empty() {
                 let new_content = format!("{}\n{}", existing, companion_rules);
                 if std::fs::write(&hyprland_conf, new_content).is_ok() {
                     should_reload = true;
@@ -266,6 +375,7 @@ pub fn run() {
             app.manage(AppState {
                 os_controller,
                 memory_store: memory_store.clone(),
+                pending_annotation: Arc::new(Mutex::new(None)),
             });
 
             #[cfg(target_os = "linux")]
@@ -369,8 +479,9 @@ pub fn run() {
             });
 
             // 8. Spawn Async Husk Mode Socket Listener
+            let husk_handle = app_handle.clone();
             tauri::async_runtime::spawn(async move {
-                if let Err(err) = husk::start_husk_listener(app_handle).await {
+                if let Err(err) = husk::start_husk_listener(husk_handle).await {
                     eprintln!("[HuskMode] Fatal error in socket listener: {}", err);
                 }
             });
@@ -391,6 +502,8 @@ pub fn run() {
             ipc::delete_memory,
             ipc::get_relevant_memory_context,
             ipc::set_window_clickthrough,
+            ipc::get_permission_mode,
+            ipc::set_permission_mode,
             hands::vision::capture_screen_snapshot,
             show_dashboard,
             hide_mascot,
@@ -399,6 +512,10 @@ pub fn run() {
             quit_app,
             update_global_shortcuts,
             open_devtools,
+            hide_overlay,
+            draw_on_screen,
+            take_pending_annotation,
+            clear_screen_annotations,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

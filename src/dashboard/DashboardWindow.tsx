@@ -10,6 +10,7 @@ import { emit, listen } from "@tauri-apps/api/event";
 import { AvatarManager, DEFAULT_AVATAR_ID } from "../engine/AvatarManager";
 import { AvatarManifest } from "../types/avatar";
 import { UnifiedBrain, AIProvider } from "../brain";
+import { PermissionMode } from "../types/commands";
 
 interface MemoryItem {
   id?: number;
@@ -92,6 +93,24 @@ export const DashboardWindow: React.FC = () => {
     return { ...DEFAULT_SHORTCUTS };
   });
   const [recordingAction, setRecordingAction] = useState<string | null>(null);
+
+  // Security & Permission Mode State (safe, ask, full)
+  const [permissionMode, setPermissionMode] = useState<PermissionMode>(() => {
+    const saved = localStorage.getItem("companion_permission_mode");
+    return saved === "safe" || saved === "full" ? saved : "ask";
+  });
+
+  const handlePermissionModeChange = async (newMode: PermissionMode) => {
+    setPermissionMode(newMode);
+    try {
+      localStorage.setItem("companion_permission_mode", newMode);
+      await invoke("set_permission_mode", { mode: newMode });
+      await emit("permission-mode-changed", newMode);
+      window.dispatchEvent(new CustomEvent("permission-mode-changed", { detail: newMode }));
+    } catch (err) {
+      console.warn("Failed to update permission mode:", err);
+    }
+  };
 
   // Mascot & Wayland Display Scaling State
   const [mascotScale, setMascotScale] = useState<number>(() => {
@@ -190,9 +209,18 @@ export const DashboardWindow: React.FC = () => {
       .then((items) => setMemories(items))
       .catch((err) => console.warn("Failed to load initial memories:", err));
 
+    const initialPerm = localStorage.getItem("companion_permission_mode") || "ask";
+    invoke("set_permission_mode", { mode: initialPerm }).catch(() => {});
+
     AvatarManager.syncFromIndexedDB().then((list) => {
       setInstalledAvatars([...list]);
       setActiveAvatarId(AvatarManager.getActiveAvatarId());
+    });
+
+    const unlistenPermission = listen<PermissionMode>("permission-mode-changed", (event) => {
+      if (event.payload) {
+        setPermissionMode(event.payload);
+      }
     });
 
     const unlistenHusk = listen<any>("husk-event", (event) => {
@@ -235,6 +263,7 @@ export const DashboardWindow: React.FC = () => {
     window.addEventListener("avatar-list-updated", handleListUpdated);
 
     return () => {
+      unlistenPermission.then((fn) => fn());
       unlistenHusk.then((fn) => fn());
       unlistenAvatar.then((fn) => fn());
       window.removeEventListener("avatar-changed", handleWindowAvatarChange);
@@ -336,6 +365,14 @@ export const DashboardWindow: React.FC = () => {
     localStorage.setItem("companion_persona", persona);
     localStorage.setItem("companion_shortcuts", JSON.stringify(shortcuts));
     localStorage.setItem("companion_mascot_scale", mascotScale.toString());
+    localStorage.setItem("companion_permission_mode", permissionMode);
+
+    try {
+      await invoke("set_permission_mode", { mode: permissionMode });
+      await emit("permission-mode-changed", permissionMode);
+    } catch (err) {
+      console.warn("Could not update permission mode:", err);
+    }
 
     try {
       await invoke("update_global_shortcuts", { shortcuts });
@@ -1119,7 +1156,124 @@ export const DashboardWindow: React.FC = () => {
                 </div>
               </div>
 
-              {/* Flat Section 3: Companion Persona */}
+              {/* Flat Section 3: Security & Permissions */}
+              <div className="space-y-3 pt-2">
+                <div className="flex items-center justify-between">
+                  <div className="text-[11px] font-mono font-bold tracking-widest uppercase text-neutral-400">
+                    // SECURITY & PERMISSIONS
+                  </div>
+                  <div className="text-[10px] font-mono flex items-center gap-1.5">
+                    <span className="text-neutral-500">POLICY:</span>
+                    <span
+                      className={`font-bold px-2 py-0.5 rounded text-[9px] uppercase tracking-wider ${
+                        permissionMode === "full"
+                          ? "bg-[#D94848]/20 border border-[#D94848]/50 text-[#D94848]"
+                          : permissionMode === "safe"
+                          ? "bg-[#2E9E6B]/20 border border-[#2E9E6B]/50 text-[#2E9E6B]"
+                          : "bg-[#EBA821]/20 border border-[#EBA821]/50 text-[#EBA821]"
+                      }`}
+                    >
+                      {permissionMode === "safe"
+                        ? "SAFE MODE"
+                        : permissionMode === "full"
+                        ? "FULL AUTONOMOUS"
+                        : "ASK MODE (DEFAULT)"}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  {/* Safe Mode */}
+                  <button
+                    type="button"
+                    onClick={() => handlePermissionModeChange("safe")}
+                    className={`p-3.5 rounded-lg border text-left transition-all relative ${
+                      permissionMode === "safe"
+                        ? "bg-white/[0.06] border-white/20 border-l-4 border-l-[#2E9E6B] text-neutral-100 shadow-sm"
+                        : "bg-black/20 border-white/5 hover:border-white/10 text-neutral-400"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-1.5">
+                        <span className="w-2 h-2 rounded-full bg-[#2E9E6B]" />
+                        <span className="text-xs font-mono font-bold text-neutral-200 uppercase tracking-wide">
+                          Safe
+                        </span>
+                      </div>
+                      {permissionMode === "safe" && (
+                        <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-[#2E9E6B] text-[#12141A]">
+                          ACTIVE
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-[11px] text-neutral-400 leading-relaxed">
+                      Только безвредные действия: запуск приложений из меню, переход по URL, чтение системного контекста. Выполнение терминальных shell-команд и файловых модификаций строго заблокировано.
+                    </p>
+                  </button>
+
+                  {/* Ask Mode (Default) */}
+                  <button
+                    type="button"
+                    onClick={() => handlePermissionModeChange("ask")}
+                    className={`p-3.5 rounded-lg border text-left transition-all relative ${
+                      permissionMode === "ask"
+                        ? "bg-white/[0.06] border-white/20 border-l-4 border-l-[#EBA821] text-neutral-100 shadow-sm"
+                        : "bg-black/20 border-white/5 hover:border-white/10 text-neutral-400"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-1.5">
+                        <span className="w-2 h-2 rounded-full bg-[#EBA821]" />
+                        <span className="text-xs font-mono font-bold text-neutral-200 uppercase tracking-wide">
+                          Ask (Default)
+                        </span>
+                      </div>
+                      {permissionMode === "ask" && (
+                        <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-[#EBA821] text-[#12141A]">
+                          ACTIVE
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-[11px] text-neutral-400 leading-relaxed">
+                      Интерактивный контроль: безопасные действия выполняются сразу. Любые shell-команды и деструктивные действия требуют подтверждения в бабле маскота кнопками [Allow] / [Deny].
+                    </p>
+                  </button>
+
+                  {/* Full Mode (Autonomous with High-Risk Crimson Badge) */}
+                  <button
+                    type="button"
+                    onClick={() => handlePermissionModeChange("full")}
+                    className={`p-3.5 rounded-lg border text-left transition-all relative ${
+                      permissionMode === "full"
+                        ? "bg-white/[0.06] border-white/20 border-l-4 border-l-[#D94848] text-neutral-100 shadow-sm"
+                        : "bg-black/20 border-white/5 hover:border-white/10 text-neutral-400"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-1.5">
+                        <span className="w-2 h-2 rounded-full bg-[#D94848] animate-pulse" />
+                        <span className="text-xs font-mono font-bold text-neutral-200 uppercase tracking-wide">
+                          Full Access
+                        </span>
+                      </div>
+                      <span className="text-[9px] font-mono font-bold px-1.5 py-0.5 rounded bg-[#D94848] text-white tracking-wider uppercase shadow-sm">
+                        RISK: HIGH
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-neutral-400 leading-relaxed mb-2.5">
+                      Полный автопилот: все вызовы инструментов и shell-команды выполняются немедленно без запроса подтверждения.
+                    </p>
+                    <div className="text-[10px] text-[#D94848] bg-[#D94848]/10 border border-[#D94848]/30 rounded px-2 py-1.5 flex items-start gap-1.5 font-mono">
+                      <svg className="w-3.5 h-3.5 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                      </svg>
+                      <span className="leading-tight">Внимание: модель получает неограниченный прямой доступ к ОС без подтверждения.</span>
+                    </div>
+                  </button>
+                </div>
+              </div>
+
+              {/* Flat Section 4: Companion Persona */}
               <div className="space-y-3 pt-2">
                 <div className="flex items-center justify-between">
                   <div className="text-[11px] font-mono font-bold tracking-widest uppercase text-neutral-400">
@@ -1154,7 +1308,7 @@ export const DashboardWindow: React.FC = () => {
                 />
               </div>
 
-              {/* Flat Section 4: Hotkeys */}
+              {/* Flat Section 5: Hotkeys */}
               <div className="space-y-3 pt-2">
                 <div className="flex items-center justify-between">
                   <div className="text-[11px] font-mono font-bold tracking-widest uppercase text-neutral-400">
@@ -1210,7 +1364,7 @@ export const DashboardWindow: React.FC = () => {
                 </div>
               </div>
 
-              {/* Flat Section 5: Wayland / HiDPI Scaling */}
+              {/* Flat Section 6: Wayland / HiDPI Scaling */}
               <div className="space-y-3 pt-2">
                 <div className="flex items-center justify-between">
                   <div className="text-[11px] font-mono font-bold tracking-widest uppercase text-neutral-400">
@@ -1258,7 +1412,7 @@ export const DashboardWindow: React.FC = () => {
                 />
               </div>
 
-              {/* Flat Section 6: System Profile & App Indexer */}
+              {/* Flat Section 7: System Profile & App Indexer */}
               <div className="space-y-3 pt-2">
                 <div className="flex items-center justify-between">
                   <div className="text-[11px] font-mono font-bold tracking-widest uppercase text-neutral-400">

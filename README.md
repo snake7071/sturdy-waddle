@@ -36,6 +36,7 @@
   - Open web links in the default browser (`open_url`).
   - Execute commands in persistent terminal windows (`execute_shell`).
   - Window perching (`window_perch`), screen snapshot capture (`capture_screen`), and countdown timers (`set_timer`).
+  - On-screen vector annotations (`draw_on_screen`, `clear_screen_annotations`): the companion draws SAO-style HUD highlights, arrows, framing boxes and freehand doodles directly onto a transparent, click-through fullscreen overlay with normalized 0-1000 coordinates.
 
 ### 3. Native OS Controller (`Hands` & `PlatformAdapter`)
 - **`PlatformAdapter` Architecture**: Extensible cross-platform abstraction layer for OS automation without hardcoded distribution paths.
@@ -59,6 +60,7 @@
   - AI Provider toggle (Google Gemini <-> DeepSeek).
   - Masked API key inputs with show/hide password toggle and direct portal links (Google AI Studio, DeepSeek Platform).
   - Model selection dropdowns and optional DeepSeek Base URL override.
+  - **Permission mode** (`safe` / `ask` / `full`) controlling whether shell execution and destructive actions are blocked, require approval, or run autonomously.
   - **Test Connection**: Instant ping test measuring response latency in milliseconds.
   - **Save & Apply**: Persists settings and immediately notifies the live mascot window without app restarts.
 - **Avatars**: Avatar catalog, sprite sheet inspector, and animation preview.

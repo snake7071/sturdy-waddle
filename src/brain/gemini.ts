@@ -6,8 +6,8 @@
 
 import { GoogleGenAI } from "@google/genai";
 import { sanitizeForLLM } from "./sanitizer";
-import { CompanionCommand } from "../types/commands";
-import { GEMINI_TOOLS } from "./tools";
+import { CompanionCommand, PermissionMode, normalizeDrawOnScreenPayload } from "../types/commands";
+import { getFilteredGeminiTools } from "./tools";
 import { BrainProvider, CommandExecutor, SendPromptResult } from "./provider";
 
 export interface SystemProfile {
@@ -50,6 +50,7 @@ export interface BrainConfig {
   thinkingBudget?: number;
   maxShortTermHistoryTurns?: number;
   compactionThresholdTokens?: number;
+  permissionMode?: PermissionMode;
 }
 
 export type { CommandExecutor };
@@ -121,6 +122,7 @@ function formatGeminiError(err: any): string {
 export class GeminiBrain implements BrainProvider {
   private shortTermHistory: BrainTurn[] = [];
   private config: BrainConfig;
+  private permissionMode: PermissionMode;
   private onMemoryCompactionGlitch?: (summary: string) => void;
 
   constructor(
@@ -134,7 +136,57 @@ export class GeminiBrain implements BrainProvider {
       compactionThresholdTokens: 4000,
       ...config,
     };
+    const storedPermission =
+      typeof window !== "undefined"
+        ? (localStorage.getItem("companion_permission_mode") as PermissionMode)
+        : null;
+    this.permissionMode =
+      config.permissionMode ||
+      (storedPermission === "safe" || storedPermission === "full" ? storedPermission : "ask");
     this.onMemoryCompactionGlitch = onMemoryCompactionGlitch;
+    this.restoreSavedHistory();
+  }
+
+  public clearHistory(): void {
+    this.shortTermHistory = [];
+  }
+
+  public syncHistory(messages: Array<{ role: "user" | "companion"; text: string }>): void {
+    const turns: BrainTurn[] = [];
+    for (const msg of messages) {
+      if (!msg.text || !msg.text.trim()) continue;
+      const cleanText = msg.text.replace(/^\[Снимок экрана\]\s*/i, "").trim();
+      if (!cleanText) continue;
+      turns.push({
+        role: msg.role === "user" ? "user" : "model",
+        parts: [{ text: cleanText }],
+      });
+    }
+    this.shortTermHistory = this.sanitizeHistory(turns);
+  }
+
+  private restoreSavedHistory(): void {
+    if (typeof window === "undefined") return;
+    try {
+      const saved = localStorage.getItem("companion_chat_history");
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          const maxTurns = this.config.maxShortTermHistoryTurns || 20;
+          this.syncHistory(parsed.slice(-maxTurns));
+        }
+      }
+    } catch (e) {
+      console.warn("[GeminiBrain] Failed to restore saved chat history:", e);
+    }
+  }
+
+  public setPermissionMode(mode: PermissionMode): void {
+    this.permissionMode = mode;
+  }
+
+  public getPermissionMode(): PermissionMode {
+    return this.permissionMode;
   }
 
   public setSystemProfile(profile: SystemProfile): void {
@@ -219,6 +271,13 @@ STRICT MEMORY RULES:
 `
         : "";
 
+    const permissionNote =
+      this.permissionMode === "safe"
+        ? "\nSECURITY MODE: SAFE MODE ACTIVE. Shell execution is disabled. Only execute harmless tools (launch_app, open_url, save_memory, window_perch, set_timer).\n"
+        : this.permissionMode === "full"
+        ? "\nSECURITY MODE: FULL ACCESS MODE ACTIVE. Autonomous execution of tools and commands is allowed.\n"
+        : "\nSECURITY MODE: ASK MODE ACTIVE. Shell commands and destructive operations require user approval before execution.\n";
+
     // Determine companion personality / persona
     let persona: string | null = null;
     if (typeof window !== "undefined") {
@@ -243,13 +302,20 @@ STRICT MEMORY RULES:
     return `${envHeader}${characterSection}BREVITY CONSTRAINT (STRICT): You must ALWAYS respond in 1 to 2 concise sentences maximum.
 Respond in the language the user speaks (e.g. Russian if user speaks Russian).
 Never write long paragraphs or markdown bullet lists in standard chat.
-Your responses are displayed in a compact floating speech bubble and read aloud by TTS.${memorySection}
+Your responses are displayed in a compact floating speech bubble and read aloud by TTS.${memorySection}${permissionNote}
 
-VISION & SCREEN AWARENESS:
-When an image/screenshot is attached to the user prompt (Vision Mode), you have direct visual perception of their screen.
-- Carefully examine the visual content of the screenshot to answer questions about what is visible, open windows, text, code, or desktop layout.
-- You have true multimodal vision — describe what you see directly! Never claim you cannot see the image or that you only see file size when an image is provided.
-- Do not invoke 'capture_screen' if a screenshot is already attached to the prompt.
+VISION & SCREEN AWARENESS (LIVE MULTIMODAL DESKTOP EYE):
+You live directly on the user's desktop with real-time visual capabilities.
+1. When a screenshot is attached to the prompt:
+   - Carefully examine the visual content of the screenshot to answer questions about open windows, tabs, buttons, code, or desktop layout.
+   - Describe what you actually see in the image with high accuracy.
+2. When NO screenshot is attached to the prompt:
+   - If the user asks what is on screen, what you see, where any UI element/window/tab/button is, or asks follow-ups ("а вторая?", "покажи", "обведи", "найди"):
+     NEVER guess from old dialog turns or hallucinate!
+     NEVER ask the user to provide a screenshot!
+     NEVER say you are blind or don't see the screen!
+     -> IMMEDIATELY invoke the \`capture_screen\` tool (reason: "context_inspection") to take a live screenshot!
+     In the next iteration, analyze the captured screenshot and act/draw with high precision.
 
 ACTIONS & TOOLS (ROLE AS SEMANTIC BRAIN):
 You control the user's desktop computer via tools.
@@ -282,7 +348,26 @@ You control the user's desktop computer via tools.
      * If a command succeeded and returned what was requested, summarize and speak the answer in 1-2 sentences.
      * If a command failed, returned an error, or returned empty output (for example, searching for a file in ~ produced no results): DO NOT GIVE UP IMMEDIATELY! Think about why, and call another tool to try alternative directories (e.g. ~/Downloads, ~/Documents), case-insensitive patterns (e.g. \`find ~ -iname "*pattern*"\`), or different commands.
      * You can invoke multiple consecutive tool calls across turns until you reach the goal.
-     * However, if after trying multiple sensible attempts nothing is found or possible, politely explain in 1-2 sentences that you couldn't find or complete it.`;
+     * However, if after trying multiple sensible attempts nothing is found or possible, politely explain in 1-2 sentences that you couldn't find or complete it.
+7. SCREEN ANNOTATIONS & VISUAL HIGHLIGHTING (draw_on_screen):
+   You can draw visual annotations directly onto the user's screen in Sword Art Online (SAO) HUD aesthetic!
+   - Coordinates are normalized 0 to 1000: (0,0) is top-left, (1000,1000) is bottom-right, (500,500) is center.
+   - To place shapes accurately, mentally divide the screenshot into a 10x10 grid of 100-unit cells and put the target in its correct cell. Estimate both x and y against the actual image, not from memory.
+   - Sizes (radius, width, height) use the same horizontal units as x, so a circle stays round.
+   - Primitives:
+     * 'circle': { x, y, radius } to circle buttons, errors, icons, or points of interest.
+     * 'rect': { x, y, width, height } to frame input fields, notifications, windows, tabs, or yourself (square/box).
+     * 'arrow': { startX, startY, endX, endY } to point directly at an element (endX, endY is the target point).
+     * 'freehand': { points: [{x, y}, ...] } for underlines, stars, checkmarks, or playful doodles.
+     * 'label': optional text callout attached to the shape (e.g. 'Нажми сюда', 'Error here').
+   - Colors: '#EBA821' (amber gold default), '#D94848' (crimson for warnings/errors), '#2E9E6B' (emerald green).
+   - ACTIVE EXECUTION ON ELLIPSES & FOLLOW-UPS:
+     When the user asks short follow-ups like "а вторая?", "а третья?", "покажи её", "обведи её":
+     This is an ACTION command to HIGHLIGHT that element!
+     DO NOT just reply with passive text like "Вот вторая вкладка" or "Скажи, что обвести" without calling \`draw_on_screen\`!
+     IMMEDIATELY invoke \`draw_on_screen\` to highlight the requested element!
+   - If the user says you missed or pointed to the wrong element ("ты третью обвела", "не то обвела"):
+     Immediately invoke \`capture_screen\` to re-examine the current screen and call \`draw_on_screen\` on the correct element.`;
   }
 
   /**
@@ -416,9 +501,7 @@ You control the user's desktop computer via tools.
       };
 
       if (allowTools) {
-        const activeTools = imageBase64
-          ? GEMINI_TOOLS.filter((t) => t.name !== "capture_screen")
-          : GEMINI_TOOLS;
+        const activeTools = getFilteredGeminiTools(this.permissionMode, !!imageBase64);
         cfg.tools = [{ functionDeclarations: activeTools as any }];
       }
 
@@ -885,6 +968,21 @@ You control the user's desktop computer via tools.
           },
         };
       }
+      case "draw_on_screen":
+        return {
+          id,
+          timestamp,
+          type: "draw_on_screen",
+          securityLevel: "safe",
+          payload: normalizeDrawOnScreenPayload(safeArgs),
+        };
+      case "clear_screen_annotations":
+        return {
+          id,
+          timestamp,
+          type: "clear_screen_annotations",
+          securityLevel: "safe",
+        };
       default:
         return null;
     }

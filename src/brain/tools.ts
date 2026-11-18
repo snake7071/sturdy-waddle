@@ -1,7 +1,10 @@
 /**
  * GNU General Public License v3.0
- * Gemini Tool Calling Function Declarations
+ * Gemini & OpenAI Tool Calling Function Declarations
  */
+
+import { PermissionMode } from "../types/commands";
+export type { PermissionMode };
 
 export const GEMINI_TOOLS = [
   {
@@ -59,7 +62,7 @@ export const GEMINI_TOOLS = [
   {
     name: "capture_screen",
     description:
-      "Captures a single screenshot on user demand or error diagnosis. DO NOT call this if an image is already attached to the user's prompt (Vision Mode).",
+      "Captures a fresh live screenshot of the user's desktop. Call this IMMEDIATELY whenever the user asks what you see, what is on screen, where something is located, asks to find/show/highlight any UI element, or when you need up-to-date visual confirmation of the screen. NEVER tell the user to provide a screenshot — take it autonomously with this tool. Do NOT call this if a fresh screenshot is already attached to the current prompt.",
     parameters: {
       type: "OBJECT",
       properties: {
@@ -157,6 +160,106 @@ export const GEMINI_TOOLS = [
       },
     },
   },
+  {
+    name: "draw_on_screen",
+    description:
+      "Draws visual vector annotations, highlights, arrows, framing boxes, or freehand doodles directly onto the user's screen in Sword Art Online (SAO) HUD aesthetic. Coordinates are normalized 0 to 1000: (0,0) is top-left, (1000,1000) is bottom-right, (500,500) is the screen center. To estimate coordinates accurately, mentally divide the screenshot into a 10x10 grid of 100-unit cells and place the target in the correct cell. Sizes (radius, width, height) use the same horizontal units as x. Use this tool whenever the user asks where something is, to point out a button or icon, highlight a window or error, draw an arrow, underline text, or draw a cute doodle on screen.",
+    parameters: {
+      type: "OBJECT",
+      properties: {
+        shapes: {
+          type: "ARRAY",
+          description: "List of visual annotation shapes to render on the screen overlay",
+          items: {
+            type: "OBJECT",
+            properties: {
+              type: {
+                type: "STRING",
+                enum: ["circle", "rect", "arrow", "freehand"],
+                description:
+                  "Shape primitive: 'circle' to circle an icon or point of interest; 'rect' to frame a window or input; 'arrow' to point directly to an element; 'freehand' for underlines and doodles.",
+              },
+              color: {
+                type: "STRING",
+                description:
+                  "Color hex code or preset: '#EBA821' (amber gold default), '#D94848' (crimson for warnings/errors), '#2E9E6B' (emerald green for success), '#00D2FF' (cyan).",
+              },
+              x: {
+                type: "INTEGER",
+                description: "Center X for circle or top-left X for rect (0-1000)",
+              },
+              y: {
+                type: "INTEGER",
+                description: "Center Y for circle or top-left Y for rect (0-1000)",
+              },
+              radius: {
+                type: "INTEGER",
+                description: "Radius for circle in the same horizontal 0-1000 units as x (~20 for a small button/icon, ~50 for a window or large area)",
+              },
+              width: {
+                type: "INTEGER",
+                description: "Width for rect (0-1000)",
+              },
+              height: {
+                type: "INTEGER",
+                description: "Height for rect (0-1000)",
+              },
+              startX: {
+                type: "INTEGER",
+                description: "Arrow origin X (0-1000)",
+              },
+              startY: {
+                type: "INTEGER",
+                description: "Arrow origin Y (0-1000)",
+              },
+              endX: {
+                type: "INTEGER",
+                description: "Arrow pointing tip X (0-1000). The arrow points right here.",
+              },
+              endY: {
+                type: "INTEGER",
+                description: "Arrow pointing tip Y (0-1000). The arrow points right here.",
+              },
+              points: {
+                type: "ARRAY",
+                description: "Array of {x, y} coordinate points (0-1000) for freehand paths or doodles",
+                items: {
+                  type: "OBJECT",
+                  properties: {
+                    x: { type: "INTEGER" },
+                    y: { type: "INTEGER" },
+                  },
+                  required: ["x", "y"],
+                },
+              },
+              label: {
+                type: "STRING",
+                description: "Optional SAO HUD callout text label shown alongside the shape (e.g. 'Нажми сюда', 'Error Line')",
+              },
+            },
+            required: ["type"],
+          },
+        },
+        durationSeconds: {
+          type: "INTEGER",
+          description: "Duration in seconds before annotation smoothly fades out (default: 6)",
+        },
+        explanation: {
+          type: "STRING",
+          description: "Brief note explaining what you are highlighting on screen",
+        },
+      },
+      required: ["shapes"],
+    },
+  },
+  {
+    name: "clear_screen_annotations",
+    description: "Immediately dismisses and clears any active drawings or visual annotations currently visible on the user's screen.",
+    parameters: {
+      type: "OBJECT",
+      properties: {},
+    },
+  },
 ] as const;
 
 /**
@@ -230,7 +333,7 @@ export const OPENAI_TOOLS = [
     function: {
       name: "capture_screen",
       description:
-        "Captures a single screenshot on user demand or error diagnosis. DO NOT call this if an image is already attached to the user's prompt (Vision Mode).",
+        "Captures a fresh live screenshot of the user's desktop. Call this IMMEDIATELY whenever the user asks what you see, what is on screen, where something is located, asks to find/show/highlight any UI element, or when you need up-to-date visual confirmation of the screen. NEVER tell the user to provide a screenshot — take it autonomously with this tool. Do NOT call this if a fresh screenshot is already attached to the current prompt.",
       parameters: {
         type: "object",
         properties: {
@@ -341,4 +444,140 @@ export const OPENAI_TOOLS = [
       },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "draw_on_screen",
+      description:
+        "Draws visual vector annotations, highlights, arrows, framing boxes, or freehand doodles directly onto the user's screen in Sword Art Online (SAO) HUD aesthetic. Coordinates are normalized 0 to 1000: (0,0) is top-left, (1000,1000) is bottom-right, (500,500) is the screen center. To estimate coordinates accurately, mentally divide the screenshot into a 10x10 grid of 100-unit cells and place the target in the correct cell. Sizes (radius, width, height) use the same horizontal units as x. Use this tool whenever the user asks where something is, to point out a button or icon, highlight a window or error, draw an arrow, underline text, or draw a cute doodle on screen.",
+      parameters: {
+        type: "object",
+        properties: {
+          shapes: {
+            type: "array",
+            description: "List of visual annotation shapes to render on the screen overlay",
+            items: {
+              type: "object",
+              properties: {
+                type: {
+                  type: "string",
+                  enum: ["circle", "rect", "arrow", "freehand"],
+                  description:
+                    "Shape primitive: 'circle' to circle an icon or point of interest; 'rect' to frame a window or input; 'arrow' to point directly to an element; 'freehand' for underlines and doodles.",
+                },
+                color: {
+                  type: "string",
+                  description:
+                    "Color hex code or preset: '#EBA821' (amber gold default), '#D94848' (crimson for warnings/errors), '#2E9E6B' (emerald green for success), '#00D2FF' (cyan).",
+                },
+                x: {
+                  type: "integer",
+                  description: "Center X for circle or top-left X for rect (0-1000)",
+                },
+                y: {
+                  type: "integer",
+                  description: "Center Y for circle or top-left Y for rect (0-1000)",
+                },
+                radius: {
+                  type: "integer",
+                  description: "Radius for circle in the same horizontal 0-1000 units as x (~20 for a small button/icon, ~50 for a window or large area)",
+                },
+                width: {
+                  type: "integer",
+                  description: "Width for rect (0-1000)",
+                },
+                height: {
+                  type: "integer",
+                  description: "Height for rect (0-1000)",
+                },
+                startX: {
+                  type: "integer",
+                  description: "Arrow origin X (0-1000)",
+                },
+                startY: {
+                  type: "integer",
+                  description: "Arrow origin Y (0-1000)",
+                },
+                endX: {
+                  type: "integer",
+                  description: "Arrow pointing tip X (0-1000). The arrow points right here.",
+                },
+                endY: {
+                  type: "integer",
+                  description: "Arrow pointing tip Y (0-1000). The arrow points right here.",
+                },
+                points: {
+                  type: "array",
+                  description: "Array of {x, y} coordinate points (0-1000) for freehand paths or doodles",
+                  items: {
+                    type: "object",
+                    properties: {
+                      x: { type: "integer" },
+                      y: { type: "integer" },
+                    },
+                    required: ["x", "y"],
+                  },
+                },
+                label: {
+                  type: "string",
+                  description: "Optional SAO HUD callout text label shown alongside the shape (e.g. 'Нажми сюда', 'Error Line')",
+                },
+              },
+              required: ["type"],
+            },
+          },
+          durationSeconds: {
+            type: "integer",
+            description: "Duration in seconds before annotation smoothly fades out (default: 6)",
+          },
+          explanation: {
+            type: "string",
+            description: "Brief note explaining what you are highlighting on screen",
+          },
+        },
+        required: ["shapes"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "clear_screen_annotations",
+      description: "Immediately dismisses and clears any active drawings or visual annotations currently visible on the user's screen.",
+      parameters: {
+        type: "object",
+        properties: {},
+      },
+    },
+  },
 ] as const;
+
+/**
+ * Filter Gemini tools according to the active PermissionMode.
+ * In 'safe' mode, destructive tools like execute_shell are strictly omitted.
+ */
+export function getFilteredGeminiTools(mode: PermissionMode = "ask", omitCaptureScreen: boolean = false) {
+  let tools = [...GEMINI_TOOLS] as any[];
+  if (omitCaptureScreen) {
+    tools = tools.filter((t) => t.name !== "capture_screen");
+  }
+  if (mode === "safe") {
+    tools = tools.filter((t) => t.name !== "execute_shell");
+  }
+  return tools;
+}
+
+/**
+ * Filter OpenAI/DeepSeek tools according to the active PermissionMode.
+ * In 'safe' mode, destructive tools like execute_shell are strictly omitted.
+ */
+export function getFilteredOpenAITools(mode: PermissionMode = "ask", omitCaptureScreen: boolean = false) {
+  let tools = [...OPENAI_TOOLS] as any[];
+  if (omitCaptureScreen) {
+    tools = tools.filter((t: any) => t.function.name !== "capture_screen");
+  }
+  if (mode === "safe") {
+    tools = tools.filter((t: any) => t.function.name !== "execute_shell");
+  }
+  return tools;
+}

@@ -8,8 +8,10 @@ import { GeminiBrain, BrainConfig as GeminiConfig } from "./gemini";
 import { DeepSeekBrain, DeepSeekBrainConfig } from "./deepseek";
 import { listen } from "@tauri-apps/api/event";
 import { BrainProvider, CommandExecutor, SendPromptResult } from "./provider";
+import { PermissionMode } from "../types/commands";
 
 export * from "./provider";
+export type { PermissionMode };
 
 export type AIProvider = "gemini" | "deepseek";
 
@@ -24,24 +26,34 @@ export interface SystemProfile {
 
 export interface UnifiedBrainConfig {
   provider?: AIProvider;
+  permissionMode?: PermissionMode;
   geminiConfig?: GeminiConfig;
   deepseekConfig?: DeepSeekBrainConfig;
 }
 
 export class UnifiedBrain implements BrainProvider {
   private activeProvider: AIProvider;
+  private permissionMode: PermissionMode;
   private geminiBrain: GeminiBrain;
   private deepseekBrain: DeepSeekBrain;
   private systemProfile?: SystemProfile;
   private unlistenPromise?: Promise<() => void>;
+  private unlistenPermissionPromise?: Promise<() => void>;
 
   constructor(
     config: UnifiedBrainConfig = {},
     onMemoryCompactionGlitch?: (summary: string) => void
   ) {
     this.activeProvider = this.readStoredProvider(config.provider);
-    this.geminiBrain = new GeminiBrain(config.geminiConfig, onMemoryCompactionGlitch);
-    this.deepseekBrain = new DeepSeekBrain(config.deepseekConfig, onMemoryCompactionGlitch);
+    this.permissionMode = this.readStoredPermissionMode(config.permissionMode);
+    this.geminiBrain = new GeminiBrain(
+      { permissionMode: this.permissionMode, ...config.geminiConfig },
+      onMemoryCompactionGlitch
+    );
+    this.deepseekBrain = new DeepSeekBrain(
+      { permissionMode: this.permissionMode, ...config.deepseekConfig },
+      onMemoryCompactionGlitch
+    );
 
     // Listen for live provider/settings updates emitted from Dashboard or other windows
     if (typeof window !== "undefined") {
@@ -57,6 +69,16 @@ export class UnifiedBrain implements BrainProvider {
         }
       );
 
+      this.unlistenPermissionPromise = listen<PermissionMode>(
+        "permission-mode-changed",
+        (event) => {
+          if (event.payload) {
+            console.log("[UnifiedBrain] Switched permission mode on-the-fly to:", event.payload);
+            this.setPermissionMode(event.payload);
+          }
+        }
+      );
+
       // Local CustomEvent listener for same-window updates
       window.addEventListener("ai-settings-changed", ((e: CustomEvent) => {
         if (e.detail?.provider) {
@@ -65,6 +87,34 @@ export class UnifiedBrain implements BrainProvider {
           this.activeProvider = this.readStoredProvider();
         }
       }) as EventListener);
+
+      window.addEventListener("permission-mode-changed", ((e: CustomEvent) => {
+        if (e.detail) {
+          this.setPermissionMode(e.detail);
+        }
+      }) as EventListener);
+    }
+  }
+
+  private readStoredPermissionMode(defaultMode: PermissionMode = "ask"): PermissionMode {
+    if (typeof window === "undefined") return defaultMode;
+    const stored = localStorage.getItem("companion_permission_mode");
+    if (stored === "safe" || stored === "ask" || stored === "full") {
+      return stored;
+    }
+    return defaultMode;
+  }
+
+  public getPermissionMode(): PermissionMode {
+    return this.readStoredPermissionMode(this.permissionMode);
+  }
+
+  public setPermissionMode(mode: PermissionMode): void {
+    this.permissionMode = mode;
+    this.geminiBrain.setPermissionMode(mode);
+    this.deepseekBrain.setPermissionMode(mode);
+    if (typeof window !== "undefined") {
+      localStorage.setItem("companion_permission_mode", mode);
     }
   }
 
@@ -97,6 +147,22 @@ export class UnifiedBrain implements BrainProvider {
 
   public getSystemProfile(): SystemProfile | undefined {
     return this.systemProfile;
+  }
+
+  /**
+   * Clears conversational short-term memory across both providers
+   */
+  public clearHistory(): void {
+    this.geminiBrain.clearHistory();
+    this.deepseekBrain.clearHistory();
+  }
+
+  /**
+   * Synchronizes recent chat turns into both provider brains
+   */
+  public syncHistory(messages: Array<{ role: "user" | "companion"; text: string }>): void {
+    this.geminiBrain.syncHistory(messages);
+    this.deepseekBrain.syncHistory(messages);
   }
 
   /**
@@ -149,6 +215,9 @@ export class UnifiedBrain implements BrainProvider {
   public destroy(): void {
     if (this.unlistenPromise) {
       this.unlistenPromise.then((unlisten) => unlisten());
+    }
+    if (this.unlistenPermissionPromise) {
+      this.unlistenPermissionPromise.then((unlisten) => unlisten());
     }
   }
 }
