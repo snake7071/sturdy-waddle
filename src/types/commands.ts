@@ -135,6 +135,45 @@ export interface ClearScreenAnnotationsCommand extends BaseCommand {
   securityLevel: "safe";
 }
 
+export interface MouseClickCommand extends BaseCommand {
+  type: "mouse_click";
+  securityLevel: "destructive";
+  payload: {
+    x: number; // normalized 0-1000
+    y: number; // normalized 0-1000
+    button?: "left" | "right" | "middle";
+    clickType?: "single" | "double";
+  };
+}
+
+export interface MouseScrollCommand extends BaseCommand {
+  type: "mouse_scroll";
+  securityLevel: "destructive";
+  payload: {
+    x: number; // normalized 0-1000
+    y: number; // normalized 0-1000
+    direction?: "up" | "down";
+    amount?: number;
+  };
+}
+
+export interface TypeTextCommand extends BaseCommand {
+  type: "type_text";
+  securityLevel: "destructive";
+  payload: {
+    text: string;
+    submit?: boolean;
+  };
+}
+
+export interface PressHotkeyCommand extends BaseCommand {
+  type: "press_hotkey";
+  securityLevel: "destructive";
+  payload: {
+    keys: string[];
+  };
+}
+
 export type CompanionCommand =
   | OpenUrlCommand
   | LaunchAppCommand
@@ -148,7 +187,11 @@ export type CompanionCommand =
   | HideCompanionCommand
   | MemoryCompactionCommand
   | DrawOnScreenCommand
-  | ClearScreenAnnotationsCommand;
+  | ClearScreenAnnotationsCommand
+  | MouseClickCommand
+  | MouseScrollCommand
+  | TypeTextCommand
+  | PressHotkeyCommand;
 
 // ============================================================================
 // Tool Calling Schema Declaration for Google GenAI SDK
@@ -170,6 +213,14 @@ export interface CommandExecutionResult {
 
 export function isDestructiveCommand(command: CompanionCommand): boolean {
   if (command.type === "execute_shell") {
+    return true;
+  }
+  if (
+    command.type === "mouse_click" ||
+    command.type === "mouse_scroll" ||
+    command.type === "type_text" ||
+    command.type === "press_hotkey"
+  ) {
     return true;
   }
   if (

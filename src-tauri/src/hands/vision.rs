@@ -5,23 +5,19 @@ use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use base64::Engine;
 use image::imageops::FilterType;
 use image::{DynamicImage, ImageEncoder};
+use serde::Serialize;
 use std::io::Cursor;
 use xcap::{Monitor, Window as XCapWindow};
 
-/// Captures a snapshot of the active/primary screen, downscales it so the longest edge is max 1080p,
-/// compresses it to JPEG (~70% quality), and returns it as a Base64-encoded string.
-#[tauri::command]
-pub fn capture_screen_snapshot() -> Result<String, String> {
-    // 1. Enumerate all connected monitors
+/// Selects the monitor for capture: the one hosting the focused window, else the primary,
+/// else the first available monitor.
+fn select_monitor() -> Result<Monitor, String> {
     let monitors = Monitor::all().map_err(|e| format!("Failed to list monitors: {}", e))?;
     if monitors.is_empty() {
         return Err("No monitors detected on host".to_string());
     }
 
-    // 2. Identify target monitor:
-    // Identify monitor where the active/focused window is located,
-    // or fallback to the primary monitor, and finally to the first monitor.
-    let monitor = XCapWindow::all()
+    XCapWindow::all()
         .ok()
         .and_then(|windows| {
             windows
@@ -36,16 +32,19 @@ pub fn capture_screen_snapshot() -> Result<String, String> {
                 .cloned()
         })
         .or_else(|| monitors.first().cloned())
-        .ok_or_else(|| "Could not determine target monitor for capture".to_string())?;
+        .ok_or_else(|| "Could not determine target monitor for capture".to_string())
+}
 
-    // 3. Capture screen frame as RgbaImage
+/// Captures the monitor frame, downscales the longest edge to 1080p preserving aspect ratio,
+/// and encodes it as JPEG (~70% quality) into a Base64 string.
+fn capture_and_encode(monitor: &Monitor) -> Result<String, String> {
     let frame = monitor
         .capture_image()
         .map_err(|e| format!("Screen capture failed: {}", e))?;
 
     let dyn_image = DynamicImage::ImageRgba8(frame);
 
-    // 4. Optimization: Downscale so the longest edge is max 1080p, preserving aspect ratio.
+    // Downscale so the longest edge is max 1080p, preserving aspect ratio.
     // NOTE: using imageops::resize(max_edge, max_edge, ..) here would squash the frame into a
     // square and distort the aspect ratio, which in turn makes the LLM misjudge element positions
     // and sizes when drawing annotations. We compute proportional dimensions instead.
@@ -64,7 +63,6 @@ pub fn capture_screen_snapshot() -> Result<String, String> {
         dyn_image
     };
 
-    // 5. Compress to JPEG format (quality ~70%)
     let rgb_image = resized.to_rgb8();
     let mut jpeg_bytes = Vec::new();
     let mut cursor = Cursor::new(&mut jpeg_bytes);
@@ -79,9 +77,53 @@ pub fn capture_screen_snapshot() -> Result<String, String> {
         )
         .map_err(|e| format!("JPEG compression failed: {}", e))?;
 
-    // 6. Return Base64 encoded string
-    let b64_string = BASE64_STANDARD.encode(&jpeg_bytes);
-    Ok(b64_string)
+    Ok(BASE64_STANDARD.encode(&jpeg_bytes))
+}
+
+/// Captures a snapshot of the active/primary screen and returns it as a Base64-encoded JPEG string.
+#[tauri::command]
+pub fn capture_screen_snapshot() -> Result<String, String> {
+    let monitor = select_monitor()?;
+    capture_and_encode(&monitor)
+}
+
+/// Monitor geometry + capture, returned together so callers can map the normalized 0-1000
+/// coordinate grid used by the model and overlay back to physical pixels.
+#[derive(Serialize, Clone, Debug)]
+pub struct ScreenCaptureGeometry {
+    pub base64_image: String,
+    pub width: u32,
+    pub height: u32,
+    pub scale_factor: f64,
+    pub x: i32,
+    pub y: i32,
+}
+
+#[tauri::command]
+pub fn capture_screen_geometry() -> Result<ScreenCaptureGeometry, String> {
+    let monitor = select_monitor()?;
+    let base64_image = capture_and_encode(&monitor)?;
+    Ok(ScreenCaptureGeometry {
+        base64_image,
+        width: monitor.width().unwrap_or(0),
+        height: monitor.height().unwrap_or(0),
+        scale_factor: monitor.scale_factor().unwrap_or(1.0) as f64,
+        x: monitor.x().unwrap_or(0),
+        y: monitor.y().unwrap_or(0),
+    })
+}
+
+/// Maps a normalized (0..1000, 0..1000) coordinate to physical pixels on the active monitor,
+/// accounting for the monitor's position offset (multi-monitor).
+pub fn normalized_to_physical(nx: f64, ny: f64) -> Result<(i32, i32), String> {
+    let monitor = select_monitor()?;
+    let mx = monitor.x().unwrap_or(0) as f64;
+    let my = monitor.y().unwrap_or(0) as f64;
+    let mw = monitor.width().unwrap_or(0) as f64;
+    let mh = monitor.height().unwrap_or(0) as f64;
+    let px = mx + (nx.clamp(0.0, 1000.0) / 1000.0) * mw;
+    let py = my + (ny.clamp(0.0, 1000.0) / 1000.0) * mh;
+    Ok((px.round() as i32, py.round() as i32))
 }
 
 #[cfg(test)]

@@ -85,6 +85,21 @@ export const MascotWindow: React.FC = () => {
     }
   }, [updateHasActiveAnnotations]);
 
+  // Draws a brief amber reticle at a normalized (0-1000) point so the user sees
+  // exactly where the assistant is about to click. Cosmetic only; failures are ignored.
+  const showClickReticle = useCallback(async (x: number, y: number) => {
+    try {
+      await invoke("draw_on_screen", {
+        payload: {
+          shapes: [{ type: "circle", x, y, radius: 18, color: "#EBA821" }],
+          durationSeconds: 1,
+        },
+      });
+    } catch {
+      // reticle is non-critical
+    }
+  }, []);
+
   const [permissionMode, setPermissionMode] = useState<PermissionMode>(() => {
     const saved = localStorage.getItem("companion_permission_mode");
     return saved === "safe" || saved === "full" ? saved : "ask";
@@ -327,6 +342,14 @@ export const MascotWindow: React.FC = () => {
           const desc =
             command.type === "execute_shell"
               ? (command.payload.explanation || command.payload.command)
+              : command.type === "mouse_click"
+              ? `клик ${command.payload.button || "left"} в (${command.payload.x}, ${command.payload.y})`
+              : command.type === "mouse_scroll"
+              ? `прокрутка в (${command.payload.x}, ${command.payload.y})`
+              : command.type === "type_text"
+              ? `ввод текста${command.payload.submit ? " + Enter" : ""}`
+              : command.type === "press_hotkey"
+              ? `клавиши ${command.payload.keys.join("+")}`
               : "Действие требует подтверждения!";
           fsm.triggerNeedsApproval(`Требуется подтверждение: ${desc}`);
         });
@@ -345,6 +368,14 @@ export const MascotWindow: React.FC = () => {
         ? "Рисую на экране..."
         : command.type === "clear_screen_annotations"
         ? "Очищаю экран..."
+        : command.type === "mouse_click"
+        ? "Кликаю мышью..."
+        : command.type === "mouse_scroll"
+        ? "Прокручиваю..."
+        : command.type === "type_text"
+        ? "Печатаю текст..."
+        : command.type === "press_hotkey"
+        ? "Нажимаю клавиши..."
         : command.type === "execute_shell"
         ? "Выполняю команду..."
         : "Выполняю задачу...";
@@ -487,6 +518,61 @@ export const MascotWindow: React.FC = () => {
           success: true,
           output: "Active screen annotations dismissed.",
         };
+      } else if (command.type === "mouse_click") {
+        await showClickReticle(command.payload.x, command.payload.y);
+        try {
+          await invoke("mouse_click", {
+            x: command.payload.x,
+            y: command.payload.y,
+            button: command.payload.button || "left",
+            clickType: command.payload.clickType || "single",
+          });
+          return {
+            success: true,
+            output: `Clicked ${command.payload.button || "left"} at (${command.payload.x}, ${command.payload.y}).`,
+          };
+        } catch (err: any) {
+          return { success: false, output: `Mouse click failed: ${err?.message || err}` };
+        }
+      } else if (command.type === "mouse_scroll") {
+        await showClickReticle(command.payload.x, command.payload.y);
+        try {
+          await invoke("mouse_scroll", {
+            x: command.payload.x,
+            y: command.payload.y,
+            direction: command.payload.direction || "down",
+            amount: command.payload.amount ?? 3,
+          });
+          return {
+            success: true,
+            output: `Scrolled ${command.payload.direction || "down"} at (${command.payload.x}, ${command.payload.y}).`,
+          };
+        } catch (err: any) {
+          return { success: false, output: `Mouse scroll failed: ${err?.message || err}` };
+        }
+      } else if (command.type === "type_text") {
+        try {
+          await invoke("type_text", {
+            text: command.payload.text,
+            submit: command.payload.submit ?? false,
+          });
+          return {
+            success: true,
+            output: `Typed text${command.payload.submit ? " and pressed Enter" : ""}.`,
+          };
+        } catch (err: any) {
+          return { success: false, output: `Type text failed: ${err?.message || err}` };
+        }
+      } else if (command.type === "press_hotkey") {
+        try {
+          await invoke("press_hotkey", { keys: command.payload.keys });
+          return {
+            success: true,
+            output: `Pressed hotkey: ${command.payload.keys.join("+")}.`,
+          };
+        } catch (err: any) {
+          return { success: false, output: `Press hotkey failed: ${err?.message || err}` };
+        }
       }
       return { success: false, output: `Unknown command type: ${command.type}` };
     } catch (e: any) {

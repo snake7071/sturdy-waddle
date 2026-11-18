@@ -260,6 +260,92 @@ export const GEMINI_TOOLS = [
       properties: {},
     },
   },
+  {
+    name: "mouse_click",
+    description:
+      "Moves the mouse cursor to a normalized screen position and clicks. Use after capture_screen to click the exact button, icon, field or menu item you identified. Coordinates are 0-1000: (0,0) top-left, (1000,1000) bottom-right.",
+    parameters: {
+      type: "OBJECT",
+      properties: {
+        x: {
+          type: "INTEGER",
+          description: "Horizontal position (0-1000, 0=left edge, 1000=right edge)",
+        },
+        y: {
+          type: "INTEGER",
+          description: "Vertical position (0-1000, 0=top, 1000=bottom)",
+        },
+        button: {
+          type: "STRING",
+          enum: ["left", "right", "middle"],
+          description: "Mouse button (default left)",
+        },
+        clickType: {
+          type: "STRING",
+          enum: ["single", "double"],
+          description: "Single or double click (default single)",
+        },
+      },
+      required: ["x", "y"],
+    },
+  },
+  {
+    name: "mouse_scroll",
+    description:
+      "Moves the cursor to a normalized position (0-1000) and scrolls up or down — e.g. to scroll a list, page, browser or chat. direction: 'down' (default) or 'up'; amount: number of wheel ticks (default 3).",
+    parameters: {
+      type: "OBJECT",
+      properties: {
+        x: { type: "INTEGER", description: "Horizontal position (0-1000)" },
+        y: { type: "INTEGER", description: "Vertical position (0-1000)" },
+        direction: {
+          type: "STRING",
+          enum: ["up", "down"],
+          description: "Scroll direction (default down)",
+        },
+        amount: {
+          type: "INTEGER",
+          description: "Number of wheel ticks (default 3)",
+        },
+      },
+      required: ["x", "y"],
+    },
+  },
+  {
+    name: "type_text",
+    description:
+      "Types text into the currently focused field or window. Cyrillic text is pasted reliably via the clipboard regardless of keyboard layout. Set submit=true to press Enter afterwards.",
+    parameters: {
+      type: "OBJECT",
+      properties: {
+        text: {
+          type: "STRING",
+          description: "Text to type",
+        },
+        submit: {
+          type: "BOOLEAN",
+          description: "Press Enter after typing (default false)",
+        },
+      },
+      required: ["text"],
+    },
+  },
+  {
+    name: "press_hotkey",
+    description:
+      "Presses a keyboard shortcut, e.g. ['Ctrl','C'], ['Alt','Tab'], ['Escape'], ['Super']. Use it to copy/paste, switch windows, or close dialogs.",
+    parameters: {
+      type: "OBJECT",
+      properties: {
+        keys: {
+          type: "ARRAY",
+          description: "Ordered list of keys to press together",
+          items: { type: "STRING" },
+        },
+      },
+      required: ["keys"],
+    },
+  },
 ] as const;
 
 /**
@@ -550,26 +636,126 @@ export const OPENAI_TOOLS = [
       },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "mouse_click",
+      description:
+        "Moves the mouse cursor to a normalized screen position and clicks. Use after capture_screen to click the exact button, icon, field or menu item you identified. Coordinates are 0-1000: (0,0) top-left, (1000,1000) bottom-right.",
+      parameters: {
+        type: "object",
+        properties: {
+          x: {
+            type: "integer",
+            description: "Horizontal position (0-1000, 0=left edge, 1000=right edge)",
+          },
+          y: {
+            type: "integer",
+            description: "Vertical position (0-1000, 0=top, 1000=bottom)",
+          },
+          button: {
+            type: "string",
+            enum: ["left", "right", "middle"],
+            description: "Mouse button (default left)",
+          },
+          clickType: {
+            type: "string",
+            enum: ["single", "double"],
+            description: "Single or double click (default single)",
+          },
+        },
+        required: ["x", "y"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "mouse_scroll",
+      description:
+        "Moves the cursor to a normalized position (0-1000) and scrolls up or down — e.g. to scroll a list, page, browser or chat. direction: 'down' (default) or 'up'; amount: number of wheel ticks (default 3).",
+      parameters: {
+        type: "object",
+        properties: {
+          x: { type: "integer", description: "Horizontal position (0-1000)" },
+          y: { type: "integer", description: "Vertical position (0-1000)" },
+          direction: {
+            type: "string",
+            enum: ["up", "down"],
+            description: "Scroll direction (default down)",
+          },
+          amount: {
+            type: "integer",
+            description: "Number of wheel ticks (default 3)",
+          },
+        },
+        required: ["x", "y"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "type_text",
+      description:
+        "Types text into the currently focused field or window. Cyrillic text is pasted reliably via the clipboard regardless of keyboard layout. Set submit=true to press Enter afterwards.",
+      parameters: {
+        type: "object",
+        properties: {
+          text: {
+            type: "string",
+            description: "Text to type",
+          },
+          submit: {
+            type: "boolean",
+            description: "Press Enter after typing (default false)",
+          },
+        },
+        required: ["text"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "press_hotkey",
+      description:
+        "Presses a keyboard shortcut, e.g. ['Ctrl','C'], ['Alt','Tab'], ['Escape'], ['Super']. Use it to copy/paste, switch windows, or close dialogs.",
+      parameters: {
+        type: "object",
+        properties: {
+          keys: {
+            type: "array",
+            description: "Ordered list of keys to press together",
+            items: { type: "string" },
+          },
+        },
+        required: ["keys"],
+      },
+    },
+  },
 ] as const;
 
 /**
  * Filter Gemini tools according to the active PermissionMode.
- * In 'safe' mode, destructive tools like execute_shell are strictly omitted.
+ * In 'safe' mode, destructive tools like execute_shell and input emulation are strictly omitted.
  */
+const INPUT_TOOL_NAMES = new Set(["mouse_click", "mouse_scroll", "type_text", "press_hotkey"]);
+
 export function getFilteredGeminiTools(mode: PermissionMode = "ask", omitCaptureScreen: boolean = false) {
   let tools = [...GEMINI_TOOLS] as any[];
   if (omitCaptureScreen) {
     tools = tools.filter((t) => t.name !== "capture_screen");
   }
   if (mode === "safe") {
-    tools = tools.filter((t) => t.name !== "execute_shell");
+    tools = tools.filter((t) => t.name !== "execute_shell" && !INPUT_TOOL_NAMES.has(t.name));
   }
   return tools;
 }
 
 /**
  * Filter OpenAI/DeepSeek tools according to the active PermissionMode.
- * In 'safe' mode, destructive tools like execute_shell are strictly omitted.
+ * In 'safe' mode, destructive tools like execute_shell and input emulation are strictly omitted.
  */
 export function getFilteredOpenAITools(mode: PermissionMode = "ask", omitCaptureScreen: boolean = false) {
   let tools = [...OPENAI_TOOLS] as any[];
@@ -577,7 +763,7 @@ export function getFilteredOpenAITools(mode: PermissionMode = "ask", omitCapture
     tools = tools.filter((t: any) => t.function.name !== "capture_screen");
   }
   if (mode === "safe") {
-    tools = tools.filter((t: any) => t.function.name !== "execute_shell");
+    tools = tools.filter((t: any) => t.function.name !== "execute_shell" && !INPUT_TOOL_NAMES.has(t.function.name));
   }
   return tools;
 }

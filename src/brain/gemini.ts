@@ -985,6 +985,55 @@ You control the user's desktop computer via tools.
           type: "clear_screen_annotations",
           securityLevel: "safe",
         };
+      case "mouse_click":
+        return {
+          id,
+          timestamp,
+          type: "mouse_click",
+          securityLevel: "destructive",
+          payload: {
+            x: Number(safeArgs.x ?? 500),
+            y: Number(safeArgs.y ?? 500),
+            button: (safeArgs.button as any) || "left",
+            clickType: (safeArgs.clickType as any) || "single",
+          },
+        };
+      case "mouse_scroll":
+        return {
+          id,
+          timestamp,
+          type: "mouse_scroll",
+          securityLevel: "destructive",
+          payload: {
+            x: Number(safeArgs.x ?? 500),
+            y: Number(safeArgs.y ?? 500),
+            direction: (safeArgs.direction as any) || "down",
+            amount: Number(safeArgs.amount ?? 3),
+          },
+        };
+      case "type_text":
+        return {
+          id,
+          timestamp,
+          type: "type_text",
+          securityLevel: "destructive",
+          payload: {
+            text: String(safeArgs.text ?? ""),
+            submit: Boolean(safeArgs.submit),
+          },
+        };
+      case "press_hotkey":
+        return {
+          id,
+          timestamp,
+          type: "press_hotkey",
+          securityLevel: "destructive",
+          payload: {
+            keys: Array.isArray(safeArgs.keys)
+              ? safeArgs.keys.map((k: any) => String(k))
+              : [],
+          },
+        };
       default:
         return null;
     }
