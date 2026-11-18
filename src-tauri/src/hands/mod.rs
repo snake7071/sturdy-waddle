@@ -2,7 +2,6 @@
 // Trait-Based Cross-Platform OS Abstraction & Window Automation ("The Hands")
 
 pub mod indexer;
-pub mod input;
 pub mod system_info;
 pub mod vision;
 
@@ -102,26 +101,6 @@ pub trait OsController: Send + Sync {
 
     /// Retrieves the current security permission mode
     fn get_permission_mode(&self) -> PermissionMode;
-
-    /// Moves the cursor to the physical pixel position (x, y) and clicks.
-    fn mouse_click(&self, _x: i32, _y: i32, _button: &str, _click_type: &str) -> Result<(), String> {
-        Err("Mouse input is not implemented on this platform.".to_string())
-    }
-
-    /// Moves the cursor to (x, y) and scrolls up/down by `amount` wheel ticks.
-    fn mouse_scroll(&self, _x: i32, _y: i32, _direction: &str, _amount: i32) -> Result<(), String> {
-        Err("Mouse input is not implemented on this platform.".to_string())
-    }
-
-    /// Types text at the focused input, optionally pressing Enter at the end.
-    fn type_text(&self, _text: &str, _submit: bool) -> Result<(), String> {
-        Err("Keyboard input is not implemented on this platform.".to_string())
-    }
-
-    /// Presses a keyboard combination (e.g. ["Ctrl", "C"], ["Alt", "Tab"], ["Escape"]).
-    fn press_hotkey(&self, _keys: &[String]) -> Result<(), String> {
-        Err("Keyboard input is not implemented on this platform.".to_string())
-    }
 }
 
 /// Type alias reflecting the clean platform abstraction architecture
@@ -164,17 +143,6 @@ impl LinuxOsController {
             memory_store,
             permission_mode: Arc::new(RwLock::new(PermissionMode::default())),
         }
-    }
-
-    /// Defense-in-depth gate: input emulation is blocked in 'safe' mode regardless of
-    /// what the frontend decides, mirroring the execute_shell guard.
-    fn ensure_input_allowed(&self) -> Result<(), String> {
-        if self.get_permission_mode() == PermissionMode::Safe {
-            return Err(
-                "Permission denied: Input emulation is disabled in 'safe' permission mode.".to_string(),
-            );
-        }
-        Ok(())
     }
 
     /// Discovers the system's default terminal emulator using standard specifications:
@@ -521,26 +489,6 @@ impl OsController for LinuxOsController {
             .read()
             .map(|l| *l)
             .unwrap_or(PermissionMode::Ask)
-    }
-
-    fn mouse_click(&self, x: i32, y: i32, button: &str, click_type: &str) -> Result<(), String> {
-        self.ensure_input_allowed()?;
-        input::mouse_click(x, y, button, click_type)
-    }
-
-    fn mouse_scroll(&self, x: i32, y: i32, direction: &str, amount: i32) -> Result<(), String> {
-        self.ensure_input_allowed()?;
-        input::mouse_scroll(x, y, direction, amount)
-    }
-
-    fn type_text(&self, text: &str, submit: bool) -> Result<(), String> {
-        self.ensure_input_allowed()?;
-        input::type_text(text, submit)
-    }
-
-    fn press_hotkey(&self, keys: &[String]) -> Result<(), String> {
-        self.ensure_input_allowed()?;
-        input::press_hotkey(keys)
     }
 
     async fn execute_shell(&self, command_str: &str, cwd: Option<&str>) -> Result<ExecutionResult, String> {

@@ -167,54 +167,6 @@ fn clear_screen_annotations(app: tauri::AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn mouse_click(
-    state: tauri::State<'_, AppState>,
-    x: f64,
-    y: f64,
-    button: Option<String>,
-    click_type: Option<String>,
-) -> Result<(), String> {
-    let (px, py) = hands::vision::normalized_to_logical(x, y)?;
-    state.os_controller.mouse_click(
-        px,
-        py,
-        button.as_deref().unwrap_or("left"),
-        click_type.as_deref().unwrap_or("single"),
-    )
-}
-
-#[tauri::command]
-fn mouse_scroll(
-    state: tauri::State<'_, AppState>,
-    x: f64,
-    y: f64,
-    direction: Option<String>,
-    amount: Option<i32>,
-) -> Result<(), String> {
-    let (px, py) = hands::vision::normalized_to_logical(x, y)?;
-    state.os_controller.mouse_scroll(
-        px,
-        py,
-        direction.as_deref().unwrap_or("down"),
-        amount.unwrap_or(3),
-    )
-}
-
-#[tauri::command]
-fn type_text(
-    state: tauri::State<'_, AppState>,
-    text: String,
-    submit: Option<bool>,
-) -> Result<(), String> {
-    state.os_controller.type_text(&text, submit.unwrap_or(false))
-}
-
-#[tauri::command]
-fn press_hotkey(state: tauri::State<'_, AppState>, keys: Vec<String>) -> Result<(), String> {
-    state.os_controller.press_hotkey(&keys)
-}
-
-#[tauri::command]
 fn update_global_shortcuts(
     app: tauri::AppHandle,
     shortcuts: HashMap<String, String>,
@@ -416,17 +368,6 @@ pub fn run() {
                     "quit_app" => {
                         app.exit(0);
                     }
-                    "emergency_stop" => {
-                        // Kill-switch: force the backend into 'safe' mode so all input
-                        // emulation and shell execution is rejected immediately.
-                        if let Some(state) = app.try_state::<AppState>() {
-                            state
-                                .os_controller
-                                .set_permission_mode(crate::hands::PermissionMode::Safe);
-                        }
-                        let _ = app.emit("permission-mode-changed", "safe");
-                        let _ = app.emit("emergency-stop", ());
-                    }
                     _ => {}
                 }
             }
@@ -540,7 +481,6 @@ pub fn run() {
                 ("open_settings", "Ctrl+Shift+S"),
                 ("toggle_history", "Ctrl+Shift+L"),
                 ("quit_app", "Ctrl+Shift+Q"),
-                ("emergency_stop", "Super+Shift+X"),
             ];
             let gs = app_handle.global_shortcut();
             if let Ok(mut initial_map) = shortcut_map.lock() {
@@ -593,7 +533,6 @@ pub fn run() {
             ipc::get_permission_mode,
             ipc::set_permission_mode,
             hands::vision::capture_screen_snapshot,
-            hands::vision::capture_screen_geometry,
             show_dashboard,
             hide_mascot,
             toggle_mascot,
@@ -605,10 +544,6 @@ pub fn run() {
             draw_on_screen,
             take_pending_annotation,
             clear_screen_annotations,
-            mouse_click,
-            mouse_scroll,
-            type_text,
-            press_hotkey,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

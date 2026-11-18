@@ -59,10 +59,6 @@ export const MascotWindow: React.FC = () => {
   const [hasActiveAnnotations, setHasActiveAnnotations] = useState(false);
   const hasActiveAnnotationsRef = useRef(false);
   const annotationTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // Task-scoped auto-approval: once the user clicks "Allow for task", destructive
-  // actions (clicks/typing/shell) run without further prompts for the rest of that
-  // user message. Reset at the start of every new prompt.
-  const taskAutoApproveRef = useRef(false);
   // Control rail visibility: hidden while idle so only the mascot sprite is on screen.
   // Toggled explicitly with a right-click on the mascot; also shown while a panel is open.
   const [showControls, setShowControls] = useState(false);
@@ -88,21 +84,6 @@ export const MascotWindow: React.FC = () => {
       console.warn("Failed to clear screen annotations:", err);
     }
   }, [updateHasActiveAnnotations]);
-
-  // Draws a brief amber reticle at a normalized (0-1000) point so the user sees
-  // exactly where the assistant is about to click. Cosmetic only; failures are ignored.
-  const showClickReticle = useCallback(async (x: number, y: number) => {
-    try {
-      await invoke("draw_on_screen", {
-        payload: {
-          shapes: [{ type: "circle", x, y, radius: 18, color: "#EBA821" }],
-          durationSeconds: 1,
-        },
-      });
-    } catch {
-      // reticle is non-critical
-    }
-  }, []);
 
   const [permissionMode, setPermissionMode] = useState<PermissionMode>(() => {
     const saved = localStorage.getItem("companion_permission_mode");
@@ -188,11 +169,6 @@ export const MascotWindow: React.FC = () => {
       updateHasActiveAnnotations(false);
     });
 
-    const unlistenEmergencyStopPromise = listen("emergency-stop", () => {
-      taskAutoApproveRef.current = false;
-      fsm.triggerError("Аварийная остановка: ввод и команды заблокированы (Safe Mode).", 5000);
-    });
-
     const unlistenHistoryPromise = listen("toggle-history", () => {
       setIsHistoryOpen((prev) => !prev);
     });
@@ -222,7 +198,6 @@ export const MascotWindow: React.FC = () => {
       unlistenPromise.then((f) => f());
       unlistenPermissionPromise.then((f) => f());
       unlistenClearAnnotationsPromise.then((f) => f());
-      unlistenEmergencyStopPromise.then((f) => f());
       unlistenHistoryPromise.then((f) => f());
       unlistenScalePromise.then((f) => f());
       window.removeEventListener("keydown", handleKeyDown);
@@ -236,8 +211,6 @@ export const MascotWindow: React.FC = () => {
   const handleSendPrompt = async () => {
     if (!inputText.trim()) return;
     const prompt = inputText.trim();
-    // New user message = new task: reset task-scoped auto-approval.
-    taskAutoApproveRef.current = false;
     let useVision = isVisionMode;
     if (!useVision) {
       // Auto-detect visual queries so the user doesn't have to manually toggle Vision Mode every single time
@@ -348,23 +321,12 @@ export const MascotWindow: React.FC = () => {
 
     // 2. Ask Mode (Default): shell commands and destructive actions trigger needs_approval
     if (permissionMode === "ask") {
-      if (
-        (command.type === "execute_shell" || isDestructiveCommand(command)) &&
-        !taskAutoApproveRef.current
-      ) {
+      if (command.type === "execute_shell" || isDestructiveCommand(command)) {
         return new Promise<{ success: boolean; output: string }>((resolve) => {
           setPendingApproval({ command, resolve });
           const desc =
             command.type === "execute_shell"
               ? (command.payload.explanation || command.payload.command)
-              : command.type === "mouse_click"
-              ? `клик ${command.payload.button || "left"} в (${command.payload.x}, ${command.payload.y})`
-              : command.type === "mouse_scroll"
-              ? `прокрутка в (${command.payload.x}, ${command.payload.y})`
-              : command.type === "type_text"
-              ? `ввод текста${command.payload.submit ? " + Enter" : ""}`
-              : command.type === "press_hotkey"
-              ? `клавиши ${command.payload.keys.join("+")}`
               : "Действие требует подтверждения!";
           fsm.triggerNeedsApproval(`Требуется подтверждение: ${desc}`);
         });
@@ -383,14 +345,6 @@ export const MascotWindow: React.FC = () => {
         ? "Рисую на экране..."
         : command.type === "clear_screen_annotations"
         ? "Очищаю экран..."
-        : command.type === "mouse_click"
-        ? "Кликаю мышью..."
-        : command.type === "mouse_scroll"
-        ? "Прокручиваю..."
-        : command.type === "type_text"
-        ? "Печатаю текст..."
-        : command.type === "press_hotkey"
-        ? "Нажимаю клавиши..."
         : command.type === "execute_shell"
         ? "Выполняю команду..."
         : "Выполняю задачу...";
@@ -533,61 +487,6 @@ export const MascotWindow: React.FC = () => {
           success: true,
           output: "Active screen annotations dismissed.",
         };
-      } else if (command.type === "mouse_click") {
-        await showClickReticle(command.payload.x, command.payload.y);
-        try {
-          await invoke("mouse_click", {
-            x: command.payload.x,
-            y: command.payload.y,
-            button: command.payload.button || "left",
-            clickType: command.payload.clickType || "single",
-          });
-          return {
-            success: true,
-            output: `Clicked ${command.payload.button || "left"} at (${command.payload.x}, ${command.payload.y}).`,
-          };
-        } catch (err: any) {
-          return { success: false, output: `Mouse click failed: ${err?.message || err}` };
-        }
-      } else if (command.type === "mouse_scroll") {
-        await showClickReticle(command.payload.x, command.payload.y);
-        try {
-          await invoke("mouse_scroll", {
-            x: command.payload.x,
-            y: command.payload.y,
-            direction: command.payload.direction || "down",
-            amount: command.payload.amount ?? 3,
-          });
-          return {
-            success: true,
-            output: `Scrolled ${command.payload.direction || "down"} at (${command.payload.x}, ${command.payload.y}).`,
-          };
-        } catch (err: any) {
-          return { success: false, output: `Mouse scroll failed: ${err?.message || err}` };
-        }
-      } else if (command.type === "type_text") {
-        try {
-          await invoke("type_text", {
-            text: command.payload.text,
-            submit: command.payload.submit ?? false,
-          });
-          return {
-            success: true,
-            output: `Typed text${command.payload.submit ? " and pressed Enter" : ""}.`,
-          };
-        } catch (err: any) {
-          return { success: false, output: `Type text failed: ${err?.message || err}` };
-        }
-      } else if (command.type === "press_hotkey") {
-        try {
-          await invoke("press_hotkey", { keys: command.payload.keys });
-          return {
-            success: true,
-            output: `Pressed hotkey: ${command.payload.keys.join("+")}.`,
-          };
-        } catch (err: any) {
-          return { success: false, output: `Press hotkey failed: ${err?.message || err}` };
-        }
       }
       return { success: false, output: `Unknown command type: ${command.type}` };
     } catch (e: any) {
@@ -1163,7 +1062,7 @@ export const MascotWindow: React.FC = () => {
                 : "Компаньон запросил системное действие."}
             </p>
           </div>
-          <div className="flex flex-wrap gap-2 justify-end mt-3 pt-2 border-t border-white/10">
+          <div className="flex gap-2 justify-end mt-3 pt-2 border-t border-white/10">
             <button
               onClick={() => {
                 const item = pendingApproval;
@@ -1187,21 +1086,6 @@ export const MascotWindow: React.FC = () => {
               className="px-3.5 py-1 bg-[#EBA821] hover:bg-[#d89619] text-[#12141A] font-bold rounded text-[11px] transition-colors shadow-sm"
             >
               Allow
-            </button>
-            <button
-              onClick={async () => {
-                const item = pendingApproval;
-                taskAutoApproveRef.current = true;
-                setPendingApproval(null);
-                fsm.transition("working", { speechBubbleText: "Выполняю задачу..." });
-                const res = await executeCommand(item.command);
-                item.resolve(res);
-                fsm.transition("idle");
-              }}
-              className="px-3.5 py-1 bg-[#2E9E6B] hover:bg-[#26865c] text-white font-bold rounded text-[11px] transition-colors shadow-sm"
-              title="Разрешить все действия в текущей задаче без повторных подтверждений"
-            >
-              Allow for task
             </button>
           </div>
         </div>

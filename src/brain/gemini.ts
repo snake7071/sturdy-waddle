@@ -369,17 +369,7 @@ You control the user's desktop computer via tools.
      DO NOT just reply with passive text like "Вот вторая вкладка" or "Скажи, что обвести" without calling \`draw_on_screen\`!
      IMMEDIATELY invoke \`draw_on_screen\` to highlight the requested element!
    - If the user says you missed or pointed to the wrong element ("ты третью обвела", "не то обвела"):
-     Immediately invoke \`capture_screen\` to re-examine the current screen and call \`draw_on_screen\` on the correct element.
-9. COMPUTER USE (FULL DESKTOP CONTROL LOOP):
-   You can control the mouse and keyboard to accomplish real multi-step tasks on the user's computer.
-   - Act with: \`mouse_click\`, \`mouse_scroll\`, \`type_text\`, \`press_hotkey\`.
-   - Coordinates for mouse_click / mouse_scroll are normalized 0-1000 (the same grid as draw_on_screen).
-   - LOOP PATTERN for any multi-step task (e.g. "позвони Владу в Telegram"):
-     1. \`capture_screen\` to see the current state.
-     2. Identify the target element, then act (mouse_click / type_text / press_hotkey).
-     3. \`capture_screen\` again to VERIFY the action worked before the next step.
-     4. Repeat until done; when complete, confirm briefly to the user.
-   - If an action fails or the screen does not change, re-capture, reassess, and try an alternative (scroll, search, or a different control) instead of repeating the same action blindly.`;
+     Immediately invoke \`capture_screen\` to re-examine the current screen and call \`draw_on_screen\` on the correct element.`;
   }
 
   /**
@@ -547,7 +537,7 @@ You control the user's desktop computer via tools.
     };
 
     // Multi-turn Agentic ReAct Loop: allows model to evaluate tool outputs and try alternative attempts
-    const MAX_TOOL_ITERATIONS = 12;
+    const MAX_TOOL_ITERATIONS = 5;
     let iteration = 0;
     const allExecutedCommands: CompanionCommand[] = [];
     const currentConversation: any[] = [...contents];
@@ -994,55 +984,6 @@ You control the user's desktop computer via tools.
           timestamp,
           type: "clear_screen_annotations",
           securityLevel: "safe",
-        };
-      case "mouse_click":
-        return {
-          id,
-          timestamp,
-          type: "mouse_click",
-          securityLevel: "destructive",
-          payload: {
-            x: Number(safeArgs.x ?? 500),
-            y: Number(safeArgs.y ?? 500),
-            button: (safeArgs.button as any) || "left",
-            clickType: (safeArgs.clickType as any) || "single",
-          },
-        };
-      case "mouse_scroll":
-        return {
-          id,
-          timestamp,
-          type: "mouse_scroll",
-          securityLevel: "destructive",
-          payload: {
-            x: Number(safeArgs.x ?? 500),
-            y: Number(safeArgs.y ?? 500),
-            direction: (safeArgs.direction as any) || "down",
-            amount: Number(safeArgs.amount ?? 3),
-          },
-        };
-      case "type_text":
-        return {
-          id,
-          timestamp,
-          type: "type_text",
-          securityLevel: "destructive",
-          payload: {
-            text: String(safeArgs.text ?? ""),
-            submit: Boolean(safeArgs.submit),
-          },
-        };
-      case "press_hotkey":
-        return {
-          id,
-          timestamp,
-          type: "press_hotkey",
-          securityLevel: "destructive",
-          payload: {
-            keys: Array.isArray(safeArgs.keys)
-              ? safeArgs.keys.map((k: any) => String(k))
-              : [],
-          },
         };
       default:
         return null;
