@@ -599,7 +599,7 @@ export const MascotWindow: React.FC = () => {
       {context.speechBubbleText && (
         <div
           onMouseDown={(e) => e.stopPropagation()}
-          className="no-drag select-text w-full max-w-[350px] mb-2 pointer-events-auto z-50 flex flex-col justify-end"
+          className="no-drag select-text w-full max-w-[290px] mb-2 pointer-events-auto z-50 flex flex-col justify-end"
           style={{
             maxHeight: `calc(100% - ${Math.round(260 * mascotScale)}px)`,
           }}
