@@ -59,6 +59,10 @@ export const MascotWindow: React.FC = () => {
   const [hasActiveAnnotations, setHasActiveAnnotations] = useState(false);
   const hasActiveAnnotationsRef = useRef(false);
   const annotationTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Task-scoped auto-approval: once the user clicks "Allow for task", destructive
+  // actions (clicks/typing/shell) run without further prompts for the rest of that
+  // user message. Reset at the start of every new prompt.
+  const taskAutoApproveRef = useRef(false);
   // Control rail visibility: hidden while idle so only the mascot sprite is on screen.
   // Toggled explicitly with a right-click on the mascot; also shown while a panel is open.
   const [showControls, setShowControls] = useState(false);
@@ -184,6 +188,11 @@ export const MascotWindow: React.FC = () => {
       updateHasActiveAnnotations(false);
     });
 
+    const unlistenEmergencyStopPromise = listen("emergency-stop", () => {
+      taskAutoApproveRef.current = false;
+      fsm.triggerError("Аварийная остановка: ввод и команды заблокированы (Safe Mode).", 5000);
+    });
+
     const unlistenHistoryPromise = listen("toggle-history", () => {
       setIsHistoryOpen((prev) => !prev);
     });
@@ -213,6 +222,7 @@ export const MascotWindow: React.FC = () => {
       unlistenPromise.then((f) => f());
       unlistenPermissionPromise.then((f) => f());
       unlistenClearAnnotationsPromise.then((f) => f());
+      unlistenEmergencyStopPromise.then((f) => f());
       unlistenHistoryPromise.then((f) => f());
       unlistenScalePromise.then((f) => f());
       window.removeEventListener("keydown", handleKeyDown);
@@ -226,6 +236,8 @@ export const MascotWindow: React.FC = () => {
   const handleSendPrompt = async () => {
     if (!inputText.trim()) return;
     const prompt = inputText.trim();
+    // New user message = new task: reset task-scoped auto-approval.
+    taskAutoApproveRef.current = false;
     let useVision = isVisionMode;
     if (!useVision) {
       // Auto-detect visual queries so the user doesn't have to manually toggle Vision Mode every single time
@@ -336,7 +348,10 @@ export const MascotWindow: React.FC = () => {
 
     // 2. Ask Mode (Default): shell commands and destructive actions trigger needs_approval
     if (permissionMode === "ask") {
-      if (command.type === "execute_shell" || isDestructiveCommand(command)) {
+      if (
+        (command.type === "execute_shell" || isDestructiveCommand(command)) &&
+        !taskAutoApproveRef.current
+      ) {
         return new Promise<{ success: boolean; output: string }>((resolve) => {
           setPendingApproval({ command, resolve });
           const desc =
@@ -1148,7 +1163,7 @@ export const MascotWindow: React.FC = () => {
                 : "Компаньон запросил системное действие."}
             </p>
           </div>
-          <div className="flex gap-2 justify-end mt-3 pt-2 border-t border-white/10">
+          <div className="flex flex-wrap gap-2 justify-end mt-3 pt-2 border-t border-white/10">
             <button
               onClick={() => {
                 const item = pendingApproval;
@@ -1172,6 +1187,21 @@ export const MascotWindow: React.FC = () => {
               className="px-3.5 py-1 bg-[#EBA821] hover:bg-[#d89619] text-[#12141A] font-bold rounded text-[11px] transition-colors shadow-sm"
             >
               Allow
+            </button>
+            <button
+              onClick={async () => {
+                const item = pendingApproval;
+                taskAutoApproveRef.current = true;
+                setPendingApproval(null);
+                fsm.transition("working", { speechBubbleText: "Выполняю задачу..." });
+                const res = await executeCommand(item.command);
+                item.resolve(res);
+                fsm.transition("idle");
+              }}
+              className="px-3.5 py-1 bg-[#2E9E6B] hover:bg-[#26865c] text-white font-bold rounded text-[11px] transition-colors shadow-sm"
+              title="Разрешить все действия в текущей задаче без повторных подтверждений"
+            >
+              Allow for task
             </button>
           </div>
         </div>

@@ -416,6 +416,17 @@ pub fn run() {
                     "quit_app" => {
                         app.exit(0);
                     }
+                    "emergency_stop" => {
+                        // Kill-switch: force the backend into 'safe' mode so all input
+                        // emulation and shell execution is rejected immediately.
+                        if let Some(state) = app.try_state::<AppState>() {
+                            state
+                                .os_controller
+                                .set_permission_mode(crate::hands::PermissionMode::Safe);
+                        }
+                        let _ = app.emit("permission-mode-changed", "safe");
+                        let _ = app.emit("emergency-stop", ());
+                    }
                     _ => {}
                 }
             }
@@ -529,6 +540,7 @@ pub fn run() {
                 ("open_settings", "Ctrl+Shift+S"),
                 ("toggle_history", "Ctrl+Shift+L"),
                 ("quit_app", "Ctrl+Shift+Q"),
+                ("emergency_stop", "Super+Shift+X"),
             ];
             let gs = app_handle.global_shortcut();
             if let Ok(mut initial_map) = shortcut_map.lock() {
