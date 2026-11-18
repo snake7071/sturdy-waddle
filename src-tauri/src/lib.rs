@@ -124,6 +124,11 @@ fn draw_on_screen(
         *pending = Some(payload.clone());
     }
 
+    // Cover the screen. Native fullscreen on macOS switches to a new Space, which breaks a
+    // click-through annotation overlay, so use simple (borderless) fullscreen there instead.
+    #[cfg(target_os = "macos")]
+    let _ = overlay.set_simple_fullscreen(true);
+    #[cfg(not(target_os = "macos"))]
     let _ = overlay.set_fullscreen(true);
     let _ = overlay.show();
     let _ = overlay.set_always_on_top(true);
@@ -240,10 +245,16 @@ hl.window_rule({match = {class = "^(companion)$", title = "^(Companion Mascot)$"
 hl.window_rule({match = {class = "^(companion)$", title = "^(Companion Mascot)$" }, pin = true})
 hl.window_rule({match = {class = "^(companion)$", title = "^(Companion Mascot)$" }, no_shadow = true})
 hl.window_rule({match = {class = "^(companion)$", title = "^(Companion Mascot)$" }, no_blur = true})
+hl.window_rule({match = {class = "^(companion)$", title = "^(Companion Mascot)$" }, no_border = true})
 
 hl.window_rule({match = {class = "^(companion)$", title = "^(Companion Dashboard)$" }, float = true})
 hl.window_rule({match = {class = "^(companion)$", title = "^(Companion Dashboard)$" }, size = { 1000, 720 }})
 hl.window_rule({match = {class = "^(companion)$", title = "^(Companion Dashboard)$" }, center = true})
+"#);
+        } else if !existing.contains("no_border = true") {
+            // Existing mascot block predates the border-removal rule; append just the missing one.
+            companion_rules.push_str(r#"
+hl.window_rule({match = {class = "^(companion)$", title = "^(Companion Mascot)$" }, no_border = true})
 "#);
         }
         if !existing.contains("Screen Annotation Overlay") {
@@ -276,10 +287,27 @@ hl.window_rule({match = {class = "^(companion)$", title = "^(Screen Annotation O
 windowrulev2 = float, class:^(companion)$, title:^(Companion Mascot)$
 windowrulev2 = size 380 520, class:^(companion)$, title:^(Companion Mascot)$
 windowrulev2 = pin, class:^(companion)$, title:^(Companion Mascot)$
+windowrulev2 = noborder, class:^(companion)$, title:^(Companion Mascot)$
+windowrulev2 = noshadow, class:^(companion)$, title:^(Companion Mascot)$
+windowrulev2 = noblur, class:^(companion)$, title:^(Companion Mascot)$
 windowrulev2 = float, class:^(companion)$, title:^(Companion Dashboard)$
 windowrulev2 = size 1000 720, class:^(companion)$, title:^(Companion Dashboard)$
 windowrulev2 = center, class:^(companion)$, title:^(Companion Dashboard)$
 "#);
+            } else {
+                // Existing mascot block predates the no-border/no-shadow/no-blur rules; append any that are missing.
+                if !existing.contains("noborder, class:^(companion)$, title:^(Companion Mascot)") {
+                    companion_rules.push_str(r#"windowrulev2 = noborder, class:^(companion)$, title:^(Companion Mascot)$
+"#);
+                }
+                if !existing.contains("noshadow, class:^(companion)$, title:^(Companion Mascot)") {
+                    companion_rules.push_str(r#"windowrulev2 = noshadow, class:^(companion)$, title:^(Companion Mascot)$
+"#);
+                }
+                if !existing.contains("noblur, class:^(companion)$, title:^(Companion Mascot)") {
+                    companion_rules.push_str(r#"windowrulev2 = noblur, class:^(companion)$, title:^(Companion Mascot)$
+"#);
+                }
             }
             if !existing.contains("Screen Annotation Overlay") {
                 companion_rules.push_str(r#"

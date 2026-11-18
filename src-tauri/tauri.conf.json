@@ -52,8 +52,7 @@
         "skipTaskbar": true,
         "shadow": false,
         "visible": false,
-        "focusable": false,
-        "fullscreen": true
+        "focusable": false
       }
     ],
     "security": {

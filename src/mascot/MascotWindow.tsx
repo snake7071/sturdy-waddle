@@ -48,26 +48,12 @@ export const MascotWindow: React.FC = () => {
   const [hasActiveAnnotations, setHasActiveAnnotations] = useState(false);
   const hasActiveAnnotationsRef = useRef(false);
   const annotationTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // Control rail visibility: hidden while idle so only the mascot sprite is on screen;
-  // revealed on hover over the sprite or whenever a panel/annotation is active.
+  // Control rail visibility: hidden while idle so only the mascot sprite is on screen.
+  // Toggled explicitly with a right-click on the mascot; also shown while a panel is open.
   const [showControls, setShowControls] = useState(false);
-  const controlsHideTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const showControlsNow = useCallback(() => {
-    if (controlsHideTimeoutRef.current) {
-      clearTimeout(controlsHideTimeoutRef.current);
-      controlsHideTimeoutRef.current = null;
-    }
-    setShowControls(true);
-  }, []);
-
-  const scheduleHideControls = useCallback(() => {
-    if (controlsHideTimeoutRef.current) {
-      clearTimeout(controlsHideTimeoutRef.current);
-    }
-    controlsHideTimeoutRef.current = setTimeout(() => {
-      setShowControls(false);
-    }, 250);
+  const toggleControls = useCallback(() => {
+    setShowControls((prev) => !prev);
   }, []);
 
   const updateHasActiveAnnotations = useCallback((active: boolean) => {
@@ -206,9 +192,6 @@ export const MascotWindow: React.FC = () => {
       window.removeEventListener("keydown", handleKeyDown);
       if (annotationTimeoutRef.current) {
         clearTimeout(annotationTimeoutRef.current);
-      }
-      if (controlsHideTimeoutRef.current) {
-        clearTimeout(controlsHideTimeoutRef.current);
       }
       brainRef.current?.destroy();
     };
@@ -591,7 +574,7 @@ export const MascotWindow: React.FC = () => {
       onDrop={handleDrop}
       onContextMenu={(e) => {
         e.preventDefault();
-        invoke("open_devtools").catch((err) => console.error("Failed to open devtools:", err));
+        toggleControls();
       }}
     >
       {/* Quick Dismiss Screen Annotations Pill */}
@@ -750,8 +733,11 @@ export const MascotWindow: React.FC = () => {
       <div
         className="shrink-0 relative pointer-events-auto z-10"
         data-tauri-drag-region
-        onMouseEnter={showControlsNow}
-        onMouseLeave={scheduleHideControls}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          toggleControls();
+        }}
       >
         <MascotSpriteRenderer state={avatarState} scale={mascotScale} />
       </div>
@@ -766,8 +752,6 @@ export const MascotWindow: React.FC = () => {
             ? "opacity-100 pointer-events-auto"
             : "opacity-0 pointer-events-none"
         }`}
-        onMouseEnter={showControlsNow}
-        onMouseLeave={scheduleHideControls}
       >
         {/* Action 1: Chat Toggle */}
         <div className="group/rail relative flex items-center justify-end">
