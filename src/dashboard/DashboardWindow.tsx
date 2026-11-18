@@ -110,12 +110,12 @@ export const DashboardWindow: React.FC = () => {
   const [maxOutputTokens, setMaxOutputTokens] = useState<number>(() => {
     const v = localStorage.getItem("companion_max_output_tokens");
     const n = v !== null ? parseInt(v, 10) : NaN;
-    return !Number.isNaN(n) ? Math.min(8192, Math.max(128, n)) : 2048;
+    return !Number.isNaN(n) ? Math.min(8192, Math.max(128, n)) : 4096;
   });
 
   const resetAdvancedSettings = () => {
     setTemperature(0.7);
-    setMaxOutputTokens(2048);
+    setMaxOutputTokens(4096);
     localStorage.removeItem("companion_temperature");
     localStorage.removeItem("companion_max_output_tokens");
   };
@@ -1558,7 +1558,7 @@ export const DashboardWindow: React.FC = () => {
 
                     {/* Reset */}
                     <div className="flex items-center justify-between pt-1 border-t border-white/5">
-                      <span className="text-[10px] font-mono text-neutral-500">Defaults: 0.70 / 2048</span>
+                      <span className="text-[10px] font-mono text-neutral-500">Defaults: 0.70 / 4096</span>
                       <button
                         type="button"
                         onClick={resetAdvancedSettings}

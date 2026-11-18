@@ -246,8 +246,8 @@ export class GeminiBrain implements BrainProvider {
   }
 
   /**
-   * System Prompt enforcing strictly 1-2 sentence brevity for compact desktop UX and TTS,
-   * with lightweight system fingerprint meta header and dynamic SQLite memory context.
+   * System Prompt with adaptive response length (brief by default, detailed on request),
+   * plus a lightweight system fingerprint meta header and dynamic SQLite memory context.
    */
   private getSystemPrompt(memoryContext?: string): string {
     const user = this.config.userName || this.config.systemProfile?.user_name || "friend";
@@ -300,10 +300,11 @@ STRICT MEMORY RULES:
       characterSection = `You are a cute anime companion mascot living on ${user}'s desktop.\nBe playful, warm, cute, observant, intelligent, and helpful.\n`;
     }
 
-    return `${envHeader}${characterSection}BREVITY CONSTRAINT (STRICT): You must ALWAYS respond in 1 to 2 concise sentences maximum.
-Respond in the language the user speaks (e.g. Russian if user speaks Russian).
-Never write long paragraphs or markdown bullet lists in standard chat.
-Your responses are displayed in a compact floating speech bubble and read aloud by TTS.${memorySection}${permissionNote}
+    return `${envHeader}${characterSection}RESPONSE STYLE (ADAPTIVE):
+- By default keep answers short (1-2 sentences) so they fit the compact speech bubble and read well aloud.
+- Respond in the language the user speaks (e.g. Russian if user speaks Russian).
+- When the user asks for details, an explanation, a step-by-step guide, code, a comparison, or a list — provide a complete, well-structured answer (paragraphs, numbered/bulleted lists, code blocks) and do not cut it short.
+- Match the length and format to the request: brief questions get brief answers; requests for depth get thorough answers.${memorySection}${permissionNote}
 
 VISION & SCREEN AWARENESS (LIVE MULTIMODAL DESKTOP EYE):
 You live directly on the user's desktop with real-time visual capabilities.
@@ -346,10 +347,10 @@ You control the user's desktop computer via tools.
    Whenever you execute tools (e.g. searching for files with execute_shell, inspecting directories, running commands or diagnostics):
    - You will receive the actual stdout, stderr, and success status of the command.
    - CAREFULLY EVALUATE THE TOOL OUTPUT:
-     * If a command succeeded and returned what was requested, summarize and speak the answer in 1-2 sentences.
+     * If a command succeeded and returned what was requested, summarize the answer concisely (brief by default, but expand if the user asked for details).
      * If a command failed, returned an error, or returned empty output (for example, searching for a file in ~ produced no results): DO NOT GIVE UP IMMEDIATELY! Think about why, and call another tool to try alternative directories (e.g. ~/Downloads, ~/Documents), case-insensitive patterns (e.g. \`find ~ -iname "*pattern*"\`), or different commands.
      * You can invoke multiple consecutive tool calls across turns until you reach the goal.
-     * However, if after trying multiple sensible attempts nothing is found or possible, politely explain in 1-2 sentences that you couldn't find or complete it.
+     * However, if after trying multiple sensible attempts nothing is found or possible, politely explain that you couldn't find or complete it.
 7. SCREEN ANNOTATIONS & VISUAL HIGHLIGHTING (draw_on_screen):
    You can draw visual annotations directly onto the user's screen in Sword Art Online (SAO) HUD aesthetic!
    - Coordinates are normalized 0 to 1000: (0,0) is top-left, (1000,1000) is bottom-right, (500,500) is center.

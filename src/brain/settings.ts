@@ -9,7 +9,7 @@
 
 export const ADVANCED_DEFAULTS = {
   temperature: 0.7,
-  maxOutputTokens: 2048,
+  maxOutputTokens: 4096,
 } as const;
 
 export const ADVANCED_LIMITS = {

@@ -20,6 +20,17 @@ export interface ChatHistoryMessage {
   timestamp: number;
 }
 
+/**
+ * Adaptive "talking" animation duration: short replies keep the default, longer
+ * replies keep the sprite mouthing the words proportionally longer. The bubble text
+ * itself stays until dismissed, so this only controls the talking animation.
+ */
+function speechDurationForText(text: string): number {
+  const chars = (text || "").length;
+  if (chars <= 80) return 4500;
+  return Math.min(30000, Math.max(4500, Math.round(chars * 150)));
+}
+
 export const MascotWindow: React.FC = () => {
   const [fsm] = useState(() => new AvatarStateMachine("idle"));
   const [avatarState, setAvatarState] = useState<AvatarState>("idle");
@@ -276,7 +287,7 @@ export const MascotWindow: React.FC = () => {
 
       if (result.responseText) {
         appendToHistory("companion", result.responseText);
-        fsm.triggerSpeech(result.responseText, 4500);
+        fsm.triggerSpeech(result.responseText, speechDurationForText(result.responseText));
       } else {
         appendToHistory("companion", "Готово.");
         fsm.triggerSpeech("Готово.", 3000);
@@ -549,7 +560,7 @@ export const MascotWindow: React.FC = () => {
               );
               if (res.responseText) {
                 appendToHistory("companion", res.responseText);
-                fsm.triggerSpeech(res.responseText, 4500);
+                fsm.triggerSpeech(res.responseText, speechDurationForText(res.responseText));
               }
             } catch (err: any) {
               const cleanMsg = (err?.message || "Failed analyzing image.").replace(/^Error:\s*/i, "");
@@ -671,7 +682,7 @@ export const MascotWindow: React.FC = () => {
             </div>
 
             {/* Bubble Message Text (Scrolls cleanly if long, never gets clipped!) */}
-            <div className="leading-relaxed font-sans overflow-y-auto pr-1 break-words text-neutral-200 flex-1 select-text text-[12px] max-h-52">
+            <div className="leading-relaxed font-sans overflow-y-auto pr-1 break-words whitespace-pre-wrap text-neutral-200 flex-1 select-text text-[12px] max-h-64">
               {context.speechBubbleText}
             </div>
 
