@@ -45,12 +45,3 @@ export function getMaxOutputTokens(): number {
     ADVANCED_LIMITS.maxOutputTokens.max
   );
 }
-
-/**
- * User-provided system prompt override. Returns an empty string when unset, in which
- * case providers fall back to their built-in system prompt.
- */
-export function getCustomSystemPrompt(): string {
-  if (typeof window === "undefined") return "";
-  return (localStorage.getItem("companion_system_prompt") || "").trim();
-}

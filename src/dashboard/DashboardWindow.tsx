@@ -100,7 +100,7 @@ export const DashboardWindow: React.FC = () => {
     return saved === "safe" || saved === "full" ? saved : "ask";
   });
 
-  // Advanced Generation Settings (temperature, max output tokens, custom system prompt)
+  // Advanced Generation Settings (temperature, max output tokens)
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [temperature, setTemperature] = useState<number>(() => {
     const v = localStorage.getItem("companion_temperature");
@@ -112,17 +112,12 @@ export const DashboardWindow: React.FC = () => {
     const n = v !== null ? parseInt(v, 10) : NaN;
     return !Number.isNaN(n) ? Math.min(8192, Math.max(128, n)) : 2048;
   });
-  const [customSystemPrompt, setCustomSystemPrompt] = useState(
-    () => localStorage.getItem("companion_system_prompt") || ""
-  );
 
   const resetAdvancedSettings = () => {
     setTemperature(0.7);
     setMaxOutputTokens(2048);
-    setCustomSystemPrompt("");
     localStorage.removeItem("companion_temperature");
     localStorage.removeItem("companion_max_output_tokens");
-    localStorage.removeItem("companion_system_prompt");
   };
 
   const handlePermissionModeChange = async (newMode: PermissionMode) => {
@@ -393,7 +388,6 @@ export const DashboardWindow: React.FC = () => {
     localStorage.setItem("companion_permission_mode", permissionMode);
     localStorage.setItem("companion_temperature", temperature.toString());
     localStorage.setItem("companion_max_output_tokens", maxOutputTokens.toString());
-    localStorage.setItem("companion_system_prompt", customSystemPrompt);
 
     try {
       await invoke("set_permission_mode", { mode: permissionMode });
@@ -1562,43 +1556,9 @@ export const DashboardWindow: React.FC = () => {
                       </div>
                     </div>
 
-                    {/* Custom system prompt */}
-                    <div className="space-y-1.5">
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <label className="text-xs font-semibold text-neutral-200 block">Custom System Prompt</label>
-                          <span className="text-[10px] text-neutral-500">
-                            Переопределяет встроенный системный промпт (пусто = встроенный)
-                          </span>
-                        </div>
-                        {customSystemPrompt.trim() && (
-                          <button
-                            type="button"
-                            onClick={() => setCustomSystemPrompt("")}
-                            className="text-[10px] font-mono text-[#D94848] hover:text-white transition-colors"
-                          >
-                            CLEAR
-                          </button>
-                        )}
-                      </div>
-                      <textarea
-                        value={customSystemPrompt}
-                        onChange={(e) => setCustomSystemPrompt(e.target.value)}
-                        rows={5}
-                        placeholder={
-                          "Пусто — используется встроенный системный промпт.\n\nНапример:\nТы — лаконичный настольный помощник..."
-                        }
-                        className="w-full bg-black/30 border border-white/10 rounded-lg p-2.5 text-xs font-mono text-neutral-200 placeholder:text-neutral-600 outline-none focus:border-[#EBA821]/50 resize-y"
-                      />
-                      <p className="text-[10px] text-neutral-500 leading-relaxed">
-                        Внимание: при заполнении полностью заменяет встроенные инструкции (инструменты, зрение, режим прав).
-                        Безопасность при этом сохраняется на уровне кода.
-                      </p>
-                    </div>
-
                     {/* Reset */}
                     <div className="flex items-center justify-between pt-1 border-t border-white/5">
-                      <span className="text-[10px] font-mono text-neutral-500">Defaults: 0.70 / 2048 / empty</span>
+                      <span className="text-[10px] font-mono text-neutral-500">Defaults: 0.70 / 2048</span>
                       <button
                         type="button"
                         onClick={resetAdvancedSettings}
