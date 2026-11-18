@@ -113,17 +113,18 @@ pub fn capture_screen_geometry() -> Result<ScreenCaptureGeometry, String> {
     })
 }
 
-/// Maps a normalized (0..1000, 0..1000) coordinate to physical pixels on the active monitor,
-/// accounting for the monitor's position offset (multi-monitor).
-pub fn normalized_to_physical(nx: f64, ny: f64) -> Result<(i32, i32), String> {
+/// Maps a normalized (0..1000, 0..1000) coordinate to LOGICAL screen pixels on the
+/// active monitor (physical pixels divided by the scale factor). This matches the
+/// coordinate space used by compositor input: `hl.dsp.cursor.move` on Hyprland and
+/// `xdotool mousemove` on X11.
+pub fn normalized_to_logical(nx: f64, ny: f64) -> Result<(i32, i32), String> {
     let monitor = select_monitor()?;
-    let mx = monitor.x().unwrap_or(0) as f64;
-    let my = monitor.y().unwrap_or(0) as f64;
-    let mw = monitor.width().unwrap_or(0) as f64;
-    let mh = monitor.height().unwrap_or(0) as f64;
-    let px = mx + (nx.clamp(0.0, 1000.0) / 1000.0) * mw;
-    let py = my + (ny.clamp(0.0, 1000.0) / 1000.0) * mh;
-    Ok((px.round() as i32, py.round() as i32))
+    let scale = (monitor.scale_factor().unwrap_or(1.0) as f64).max(0.1);
+    let logical_w = monitor.width().unwrap_or(0) as f64 / scale;
+    let logical_h = monitor.height().unwrap_or(0) as f64 / scale;
+    let lx = (nx.clamp(0.0, 1000.0) / 1000.0) * logical_w;
+    let ly = (ny.clamp(0.0, 1000.0) / 1000.0) * logical_h;
+    Ok((lx.round() as i32, ly.round() as i32))
 }
 
 #[cfg(test)]

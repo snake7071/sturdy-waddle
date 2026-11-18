@@ -174,7 +174,7 @@ fn mouse_click(
     button: Option<String>,
     click_type: Option<String>,
 ) -> Result<(), String> {
-    let (px, py) = hands::vision::normalized_to_physical(x, y)?;
+    let (px, py) = hands::vision::normalized_to_logical(x, y)?;
     state.os_controller.mouse_click(
         px,
         py,
@@ -191,7 +191,7 @@ fn mouse_scroll(
     direction: Option<String>,
     amount: Option<i32>,
 ) -> Result<(), String> {
-    let (px, py) = hands::vision::normalized_to_physical(x, y)?;
+    let (px, py) = hands::vision::normalized_to_logical(x, y)?;
     state.os_controller.mouse_scroll(
         px,
         py,

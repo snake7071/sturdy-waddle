@@ -20,6 +20,22 @@ fn has_bin(bin: &str) -> bool {
         .unwrap_or(false)
 }
 
+fn is_hyprland() -> bool {
+    has_bin("hyprctl") && std::env::var("HYPRLAND_INSTANCE_SIGNATURE").is_ok()
+}
+
+/// Moves the cursor using Hyprland's native dispatcher (logical coordinates, correct
+/// under fractional scaling). This is the reliable path on Hyprland >= 0.55 (Lua API).
+fn hyprctl_move_cursor(x: i32, y: i32) -> Result<(), String> {
+    run(
+        "hyprctl",
+        &[
+            s("dispatch"),
+            format!("hl.dsp.cursor.move({{ x = {}, y = {} }})", x, y),
+        ],
+    )
+}
+
 fn run(bin: &str, args: &[String]) -> Result<(), String> {
     let status = Command::new(bin)
         .args(args)
@@ -72,25 +88,15 @@ fn run_capture(bin: &str, args: &[String]) -> Option<String> {
 pub fn mouse_click(x: i32, y: i32, button: &str, click_type: &str) -> Result<(), String> {
     let clicks = if click_type == "double" { 2 } else { 1 };
 
-    if has_bin("ydotool") {
-        run(
-            "ydotool",
-            &[
-                s("mousemove"),
-                s("--absolute"),
-                s("--"),
-                x.to_string(),
-                y.to_string(),
-            ],
-        )?;
+    if is_hyprland() {
+        // Hyprland: native cursor move (logical coords) + ydotool for the click itself.
+        hyprctl_move_cursor(x, y)?;
         let btn = match button {
             "right" => "0x01",
             "middle" => "0x02",
             _ => "0x00",
         };
-        for _ in 0..clicks {
-            run("ydotool", &[s("click"), s(btn)])?;
-        }
+        run("ydotool", &[s("click"), s("--repeat"), clicks.to_string(), s(btn)])?;
         Ok(())
     } else if has_bin("xdotool") {
         let btn = match button {
@@ -112,18 +118,7 @@ pub fn mouse_click(x: i32, y: i32, button: &str, click_type: &str) -> Result<(),
             ],
         )?;
         Ok(())
-    } else {
-        Err("Mouse input requires 'ydotool' (Wayland) or 'xdotool' (X11). Install one and retry.".to_string())
-    }
-}
-
-/// Moves the cursor to (x, y) then scrolls. `direction` is "up" | "down", `amount` is the
-/// number of wheel ticks.
-pub fn mouse_scroll(x: i32, y: i32, direction: &str, amount: i32) -> Result<(), String> {
-    let ticks = amount.clamp(1, 50);
-
-    if has_bin("ydotool") {
-        // Move the cursor to the target, then scroll the wheel relatively (Wayland/X11).
+    } else if has_bin("ydotool") {
         run(
             "ydotool",
             &[
@@ -134,6 +129,28 @@ pub fn mouse_scroll(x: i32, y: i32, direction: &str, amount: i32) -> Result<(), 
                 y.to_string(),
             ],
         )?;
+        let btn = match button {
+            "right" => "0x01",
+            "middle" => "0x02",
+            _ => "0x00",
+        };
+        for _ in 0..clicks {
+            run("ydotool", &[s("click"), s(btn)])?;
+        }
+        Ok(())
+    } else {
+        Err("Mouse input requires 'hyprctl' (Hyprland), 'ydotool' (Wayland) or 'xdotool' (X11). Install one and retry.".to_string())
+    }
+}
+
+/// Moves the cursor to (x, y) then scrolls. `direction` is "up" | "down", `amount` is the
+/// number of wheel ticks.
+pub fn mouse_scroll(x: i32, y: i32, direction: &str, amount: i32) -> Result<(), String> {
+    let ticks = amount.clamp(1, 50);
+
+    if is_hyprland() {
+        // Hyprland: native cursor move + relative wheel via ydotool.
+        hyprctl_move_cursor(x, y)?;
         let signed = if direction == "up" { -ticks } else { ticks };
         run(
             "ydotool",
@@ -157,8 +174,25 @@ pub fn mouse_scroll(x: i32, y: i32, direction: &str, amount: i32) -> Result<(), 
             ],
         )?;
         Ok(())
+    } else if has_bin("ydotool") {
+        run(
+            "ydotool",
+            &[
+                s("mousemove"),
+                s("--absolute"),
+                s("--"),
+                x.to_string(),
+                y.to_string(),
+            ],
+        )?;
+        let signed = if direction == "up" { -ticks } else { ticks };
+        run(
+            "ydotool",
+            &[s("mousemove"), s("--wheel"), s("-y"), signed.to_string()],
+        )?;
+        Ok(())
     } else {
-        Err("Mouse input requires 'ydotool' (Wayland) or 'xdotool' (X11). Install one and retry.".to_string())
+        Err("Mouse input requires 'hyprctl' (Hyprland), 'ydotool' (Wayland) or 'xdotool' (X11). Install one and retry.".to_string())
     }
 }
 
