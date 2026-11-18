@@ -100,6 +100,31 @@ export const DashboardWindow: React.FC = () => {
     return saved === "safe" || saved === "full" ? saved : "ask";
   });
 
+  // Advanced Generation Settings (temperature, max output tokens, custom system prompt)
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [temperature, setTemperature] = useState<number>(() => {
+    const v = localStorage.getItem("companion_temperature");
+    const n = v !== null ? parseFloat(v) : NaN;
+    return !Number.isNaN(n) ? Math.min(1.5, Math.max(0, n)) : 0.7;
+  });
+  const [maxOutputTokens, setMaxOutputTokens] = useState<number>(() => {
+    const v = localStorage.getItem("companion_max_output_tokens");
+    const n = v !== null ? parseInt(v, 10) : NaN;
+    return !Number.isNaN(n) ? Math.min(8192, Math.max(128, n)) : 2048;
+  });
+  const [customSystemPrompt, setCustomSystemPrompt] = useState(
+    () => localStorage.getItem("companion_system_prompt") || ""
+  );
+
+  const resetAdvancedSettings = () => {
+    setTemperature(0.7);
+    setMaxOutputTokens(2048);
+    setCustomSystemPrompt("");
+    localStorage.removeItem("companion_temperature");
+    localStorage.removeItem("companion_max_output_tokens");
+    localStorage.removeItem("companion_system_prompt");
+  };
+
   const handlePermissionModeChange = async (newMode: PermissionMode) => {
     setPermissionMode(newMode);
     try {
@@ -366,6 +391,9 @@ export const DashboardWindow: React.FC = () => {
     localStorage.setItem("companion_shortcuts", JSON.stringify(shortcuts));
     localStorage.setItem("companion_mascot_scale", mascotScale.toString());
     localStorage.setItem("companion_permission_mode", permissionMode);
+    localStorage.setItem("companion_temperature", temperature.toString());
+    localStorage.setItem("companion_max_output_tokens", maxOutputTokens.toString());
+    localStorage.setItem("companion_system_prompt", customSystemPrompt);
 
     try {
       await invoke("set_permission_mode", { mode: permissionMode });
@@ -1469,6 +1497,116 @@ export const DashboardWindow: React.FC = () => {
                 {syncStatus && (
                   <div className="text-[10px] font-mono text-[#2E9E6B] bg-emerald-500/10 border border-emerald-500/20 p-2 rounded text-center">
                     {syncStatus}
+                  </div>
+                )}
+              </div>
+
+              {/* Flat Section 8: Advanced Settings (Collapsible) */}
+              <div className="space-y-3 pt-2 border-t border-white/10">
+                <button
+                  type="button"
+                  onClick={() => setShowAdvanced((v) => !v)}
+                  className="w-full flex items-center justify-between group"
+                >
+                  <div className="flex items-center gap-2">
+                    <span className="w-2 h-2 rotate-45 bg-neutral-600 group-hover:bg-[#EBA821] transition-colors" />
+                    <span className="text-[11px] font-mono font-bold tracking-widest uppercase text-neutral-400 group-hover:text-neutral-200">
+                      // ADVANCED SETTINGS
+                    </span>
+                    <span className="text-[9px] font-mono text-neutral-600 border border-white/10 rounded px-1 py-0.5">
+                      POWER USER
+                    </span>
+                  </div>
+                  <span className="text-neutral-500 font-mono text-xs">{showAdvanced ? "▾" : "▸"}</span>
+                </button>
+
+                {showAdvanced && (
+                  <div className="space-y-4 pl-1">
+                    {/* Temperature */}
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <div className="sm:w-1/3">
+                        <label className="text-xs font-semibold text-neutral-200 block">Temperature</label>
+                        <span className="text-[10px] text-neutral-500">Случайность ответа: 0 — точнее, выше — креативнее</span>
+                      </div>
+                      <div className="sm:w-2/3 flex items-center gap-3">
+                        <input
+                          type="range"
+                          min="0"
+                          max="1.5"
+                          step="0.05"
+                          value={temperature}
+                          onChange={(e) => setTemperature(parseFloat(e.target.value))}
+                          className="flex-1 accent-[#EBA821] cursor-pointer"
+                        />
+                        <span className="w-14 text-right font-mono text-xs text-neutral-200">{temperature.toFixed(2)}</span>
+                      </div>
+                    </div>
+
+                    {/* Max output tokens */}
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <div className="sm:w-1/3">
+                        <label className="text-xs font-semibold text-neutral-200 block">Max Output Tokens</label>
+                        <span className="text-[10px] text-neutral-500">Максимум токенов в одном ответе (128–8192)</span>
+                      </div>
+                      <div className="sm:w-2/3 flex items-center gap-3">
+                        <input
+                          type="range"
+                          min="128"
+                          max="8192"
+                          step="128"
+                          value={maxOutputTokens}
+                          onChange={(e) => setMaxOutputTokens(parseInt(e.target.value, 10))}
+                          className="flex-1 accent-[#EBA821] cursor-pointer"
+                        />
+                        <span className="w-14 text-right font-mono text-xs text-neutral-200">{maxOutputTokens}</span>
+                      </div>
+                    </div>
+
+                    {/* Custom system prompt */}
+                    <div className="space-y-1.5">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <label className="text-xs font-semibold text-neutral-200 block">Custom System Prompt</label>
+                          <span className="text-[10px] text-neutral-500">
+                            Переопределяет встроенный системный промпт (пусто = встроенный)
+                          </span>
+                        </div>
+                        {customSystemPrompt.trim() && (
+                          <button
+                            type="button"
+                            onClick={() => setCustomSystemPrompt("")}
+                            className="text-[10px] font-mono text-[#D94848] hover:text-white transition-colors"
+                          >
+                            CLEAR
+                          </button>
+                        )}
+                      </div>
+                      <textarea
+                        value={customSystemPrompt}
+                        onChange={(e) => setCustomSystemPrompt(e.target.value)}
+                        rows={5}
+                        placeholder={
+                          "Пусто — используется встроенный системный промпт.\n\nНапример:\nТы — лаконичный настольный помощник..."
+                        }
+                        className="w-full bg-black/30 border border-white/10 rounded-lg p-2.5 text-xs font-mono text-neutral-200 placeholder:text-neutral-600 outline-none focus:border-[#EBA821]/50 resize-y"
+                      />
+                      <p className="text-[10px] text-neutral-500 leading-relaxed">
+                        Внимание: при заполнении полностью заменяет встроенные инструкции (инструменты, зрение, режим прав).
+                        Безопасность при этом сохраняется на уровне кода.
+                      </p>
+                    </div>
+
+                    {/* Reset */}
+                    <div className="flex items-center justify-between pt-1 border-t border-white/5">
+                      <span className="text-[10px] font-mono text-neutral-500">Defaults: 0.70 / 2048 / empty</span>
+                      <button
+                        type="button"
+                        onClick={resetAdvancedSettings}
+                        className="text-[10px] font-mono px-2.5 py-1 rounded bg-white/5 hover:bg-white/10 text-neutral-400 hover:text-white border border-white/10 transition-colors"
+                      >
+                        RESET TO DEFAULTS
+                      </button>
+                    </div>
                   </div>
                 )}
               </div>

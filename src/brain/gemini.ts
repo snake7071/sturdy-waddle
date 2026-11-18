@@ -9,6 +9,7 @@ import { sanitizeForLLM } from "./sanitizer";
 import { CompanionCommand, PermissionMode, normalizeDrawOnScreenPayload } from "../types/commands";
 import { getFilteredGeminiTools } from "./tools";
 import { BrainProvider, CommandExecutor, SendPromptResult } from "./provider";
+import { getTemperature, getMaxOutputTokens, getCustomSystemPrompt } from "./settings";
 
 export interface SystemProfile {
   os_name: string;
@@ -249,6 +250,11 @@ export class GeminiBrain implements BrainProvider {
    * with lightweight system fingerprint meta header and dynamic SQLite memory context.
    */
   private getSystemPrompt(memoryContext?: string): string {
+    // Advanced override: if the user provided a custom system prompt, it replaces the
+    // built-in prompt entirely (tool/vision/permission guidance included).
+    const customPrompt = getCustomSystemPrompt();
+    if (customPrompt) return customPrompt;
+
     const user = this.config.userName || this.config.systemProfile?.user_name || "friend";
     const profile = this.config.systemProfile;
 
@@ -496,8 +502,8 @@ You control the user's desktop computer via tools.
       const isLite = model.includes("flash-lite");
       const cfg: any = {
         systemInstruction,
-        temperature: 0.7,
-        maxOutputTokens: 2048,
+        temperature: getTemperature(),
+        maxOutputTokens: getMaxOutputTokens(),
       };
 
       if (allowTools) {

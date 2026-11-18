@@ -9,6 +9,7 @@ import { sanitizeForLLM } from "./sanitizer";
 import { CompanionCommand, PermissionMode, normalizeDrawOnScreenPayload } from "../types/commands";
 import { getFilteredOpenAITools } from "./tools";
 import { BrainProvider, CommandExecutor, SendPromptResult } from "./provider";
+import { getTemperature, getMaxOutputTokens, getCustomSystemPrompt } from "./settings";
 
 export interface SystemProfile {
   os_name: string;
@@ -197,6 +198,11 @@ export class DeepSeekBrain implements BrainProvider {
   }
 
   private getSystemPrompt(memoryContext?: string): string {
+    // Advanced override: if the user provided a custom system prompt, it replaces the
+    // built-in prompt entirely (tool/vision/permission guidance included).
+    const customPrompt = getCustomSystemPrompt();
+    if (customPrompt) return customPrompt;
+
     const user = this.config.userName || this.config.systemProfile?.user_name || "friend";
     const profile = this.config.systemProfile;
 
@@ -522,9 +528,12 @@ You control the user's desktop computer via tools.
       };
 
       // Tools supported primarily on deepseek-chat
-      if (!isReasoner && allowTools) {
-        payload.tools = getFilteredOpenAITools(this.permissionMode, !!imageBase64);
-        payload.temperature = 0.7;
+      if (!isReasoner) {
+        payload.max_tokens = getMaxOutputTokens();
+        if (allowTools) {
+          payload.tools = getFilteredOpenAITools(this.permissionMode, !!imageBase64);
+          payload.temperature = getTemperature();
+        }
       }
 
       const response = await fetch(`${baseUrl}/chat/completions`, {
