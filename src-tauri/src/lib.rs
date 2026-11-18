@@ -245,16 +245,16 @@ hl.window_rule({match = {class = "^(companion)$", title = "^(Companion Mascot)$"
 hl.window_rule({match = {class = "^(companion)$", title = "^(Companion Mascot)$" }, pin = true})
 hl.window_rule({match = {class = "^(companion)$", title = "^(Companion Mascot)$" }, no_shadow = true})
 hl.window_rule({match = {class = "^(companion)$", title = "^(Companion Mascot)$" }, no_blur = true})
-hl.window_rule({match = {class = "^(companion)$", title = "^(Companion Mascot)$" }, no_border = true})
+hl.window_rule({match = {class = "^(companion)$", title = "^(Companion Mascot)$" }, border_size = 0})
 
 hl.window_rule({match = {class = "^(companion)$", title = "^(Companion Dashboard)$" }, float = true})
 hl.window_rule({match = {class = "^(companion)$", title = "^(Companion Dashboard)$" }, size = { 1000, 720 }})
 hl.window_rule({match = {class = "^(companion)$", title = "^(Companion Dashboard)$" }, center = true})
 "#);
-        } else if !existing.contains("no_border = true") {
+        } else if !existing.contains("border_size = 0") {
             // Existing mascot block predates the border-removal rule; append just the missing one.
             companion_rules.push_str(r#"
-hl.window_rule({match = {class = "^(companion)$", title = "^(Companion Mascot)$" }, no_border = true})
+hl.window_rule({match = {class = "^(companion)$", title = "^(Companion Mascot)$" }, border_size = 0})
 "#);
         }
         if !existing.contains("Screen Annotation Overlay") {
